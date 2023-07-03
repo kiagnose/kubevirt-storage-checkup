@@ -18,3 +18,16 @@
  */
 
 package status
+
+import (
+	kstatus "github.com/kiagnose/kiagnose/kiagnose/status"
+)
+
+type Results struct {
+	HasDefaultStorageClass bool
+}
+
+type Status struct {
+	kstatus.Status
+	Results
+}

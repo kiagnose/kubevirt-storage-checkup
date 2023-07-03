@@ -21,8 +21,24 @@ package main
 
 import (
 	"log"
+	"os"
+
+	"github.com/kiagnose/kiagnose/kiagnose/environment"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg"
 )
 
 func main() {
 	log.Println("kubevirt-storage-checkup starting...")
+	rawEnv := environment.EnvToMap(os.Environ())
+
+	const errMessagePrefix = "kubevirt-storage-checkup failed"
+
+	namespace, err := environment.ReadNamespaceFile()
+	if err != nil {
+		log.Fatalf("%s: %v\n", errMessagePrefix, err)
+	}
+
+	if err = pkg.Run(rawEnv, namespace); err != nil {
+		log.Fatalf("%s: %v\n", errMessagePrefix, err)
+	}
 }

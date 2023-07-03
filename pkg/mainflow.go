@@ -18,3 +18,47 @@
  */
 
 package pkg
+
+import (
+	"context"
+	"log"
+
+	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/client"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/launcher"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/reporter"
+)
+
+func Run(rawEnv map[string]string, namespace string) error {
+	c, err := client.New()
+	if err != nil {
+		return err
+	}
+
+	baseConfig, err := kconfig.Read(c, rawEnv)
+	if err != nil {
+		return err
+	}
+
+	cfg, err := config.New(baseConfig)
+	if err != nil {
+		return err
+	}
+
+	printConfig(cfg)
+
+	l := launcher.New(checkup.New(c, namespace, cfg), reporter.New(c, baseConfig.ConfigMapNamespace, baseConfig.ConfigMapName))
+
+	ctx, cancel := context.WithTimeout(context.Background(), baseConfig.Timeout)
+	defer cancel()
+
+	return l.Run(ctx)
+}
+
+func printConfig(checkupConfig config.Config) {
+	log.Println("Using the following config:")
+	//FIXME
+}

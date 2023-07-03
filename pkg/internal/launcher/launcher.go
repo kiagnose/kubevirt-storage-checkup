@@ -18,3 +18,78 @@
  */
 
 package launcher
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"time"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
+)
+
+type checkup interface {
+	Setup(ctx context.Context) error
+	Run(ctx context.Context) error
+	Teardown(ctx context.Context) error
+	Results() status.Results
+}
+
+type reporter interface {
+	Report(status.Status) error
+}
+
+type Launcher struct {
+	checkup  checkup
+	reporter reporter
+}
+
+func New(checkup checkup, reporter reporter) Launcher {
+	return Launcher{
+		checkup:  checkup,
+		reporter: reporter,
+	}
+}
+
+func (l Launcher) Run(ctx context.Context) (runErr error) {
+	var runStatus status.Status
+	runStatus.StartTimestamp = time.Now()
+
+	if err := l.reporter.Report(runStatus); err != nil {
+		return err
+	}
+
+	defer func() {
+		runStatus.CompletionTimestamp = time.Now()
+		runStatus.Results = l.checkup.Results()
+		if err := l.reporter.Report(runStatus); err != nil {
+			runStatus.FailureReason = append(runStatus.FailureReason, err.Error())
+		}
+		runErr = failureReason(runStatus)
+	}()
+
+	if err := l.checkup.Setup(ctx); err != nil {
+		runStatus.FailureReason = append(runStatus.FailureReason, err.Error())
+		return err
+	}
+
+	defer func() {
+		if err := l.checkup.Teardown(ctx); err != nil {
+			runStatus.FailureReason = append(runStatus.FailureReason, err.Error())
+		}
+	}()
+
+	if err := l.checkup.Run(ctx); err != nil {
+		runStatus.FailureReason = append(runStatus.FailureReason, err.Error())
+		return err
+	}
+
+	return nil
+}
+
+func failureReason(sts status.Status) error {
+	if len(sts.FailureReason) > 0 {
+		return errors.New(strings.Join(sts.FailureReason, ", "))
+	}
+	return nil
+}
