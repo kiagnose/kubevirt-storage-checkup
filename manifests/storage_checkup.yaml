@@ -1,0 +1,80 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: storage-checkup-sa
+  namespace: $CHECKUP_NAMESPACE
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-storage-checker
+rules:
+- apiGroups: [ "storage.k8s.io" ]
+  resources: [ "storageclasses" ]
+  verbs: [ "get", "list" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-storage-checker
+subjects:
+- kind: ServiceAccount
+  name: storage-checkup-sa
+  namespace: $CHECKUP_NAMESPACE
+roleRef:
+  kind: ClusterRole
+  name: kubevirt-storage-checker
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kiagnose-configmap-access
+  namespace: $CHECKUP_NAMESPACE
+rules:
+- apiGroups: [ "" ]
+  resources: [ "configmaps" ]
+  verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kiagnose-configmap-access
+  namespace: $CHECKUP_NAMESPACE
+subjects:
+- kind: ServiceAccount
+  name: storage-checkup-sa
+roleRef:
+  kind: Role
+  name: kiagnose-configmap-access
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-checkup-config
+  namespace: $CHECKUP_NAMESPACE
+data:
+  spec.timeout: 5m
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: storage-checkup
+  namespace: $CHECKUP_NAMESPACE
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccount: storage-checkup-sa
+      restartPolicy: Never
+      containers:
+        - name: storage-checkup
+          image: $CHECKUP_IMAGE_NAME:$CHECKUP_IMAGE_TAG
+          imagePullPolicy: Always
+          env:
+            - name: CONFIGMAP_NAMESPACE
+              value: $CHECKUP_NAMESPACE
+            - name: CONFIGMAP_NAME
+              value: storage-checkup-config
