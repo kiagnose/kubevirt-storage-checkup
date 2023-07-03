@@ -58,7 +58,8 @@ func (c *Checkup) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, sc := range scs.Items {
+	for i := range scs.Items {
+		sc := &scs.Items[i]
 		if sc.Annotations[AnnDefaultStorageClass] == "true" {
 			c.results.HasDefaultStorageClass = true
 			break
