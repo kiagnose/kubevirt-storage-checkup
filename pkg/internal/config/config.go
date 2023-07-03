@@ -24,11 +24,9 @@ import (
 )
 
 type Config struct {
-	//FIXME
 }
 
 func New(baseConfig kconfig.Config) (Config, error) {
-	//FIXME
 	newConfig := Config{}
 	return newConfig, nil
 }

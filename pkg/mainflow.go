@@ -60,5 +60,4 @@ func Run(rawEnv map[string]string, namespace string) error {
 
 func printConfig(checkupConfig config.Config) {
 	log.Println("Using the following config:")
-	//FIXME
 }
