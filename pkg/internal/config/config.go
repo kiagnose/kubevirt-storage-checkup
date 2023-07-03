@@ -18,3 +18,17 @@
  */
 
 package config
+
+import (
+	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
+)
+
+type Config struct {
+	//FIXME
+}
+
+func New(baseConfig kconfig.Config) (Config, error) {
+	//FIXME
+	newConfig := Config{}
+	return newConfig, nil
+}

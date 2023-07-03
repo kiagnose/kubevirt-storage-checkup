@@ -18,3 +18,41 @@
  */
 
 package client
+
+import (
+	"context"
+
+	storagev1 "k8s.io/api/storage/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
+
+	kvcorev1 "kubevirt.io/api/core/v1"
+	"kubevirt.io/client-go/kubecli"
+)
+
+type Client struct {
+	kubecli.KubevirtClient
+}
+
+type resultWrapper struct {
+	vmi *kvcorev1.VirtualMachineInstance
+	err error
+}
+
+func New() (*Client, error) {
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	client, err := kubecli.GetKubevirtClientFromRESTConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{client}, nil
+}
+
+func (c *Client) ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error) {
+	return c.KubevirtClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+}

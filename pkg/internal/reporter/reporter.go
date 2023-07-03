@@ -18,3 +18,51 @@
  */
 
 package reporter
+
+import (
+	"strconv"
+
+	"k8s.io/client-go/kubernetes"
+
+	kreporter "github.com/kiagnose/kiagnose/kiagnose/reporter"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
+)
+
+const (
+	HasDefaultStorageClassKey = "hasDefaultStorageClass"
+)
+
+type Reporter struct {
+	kreporter.Reporter
+}
+
+func New(c kubernetes.Interface, configMapNamespace, configMapName string) *Reporter {
+	r := kreporter.New(c, configMapNamespace, configMapName)
+	return &Reporter{*r}
+}
+
+func (r *Reporter) Report(checkupStatus status.Status) error {
+	if !r.HasData() {
+		return r.Reporter.Report(checkupStatus.Status)
+	}
+
+	checkupStatus.Succeeded = len(checkupStatus.FailureReason) == 0
+
+	checkupStatus.Status.Results = formatResults(checkupStatus)
+
+	return r.Reporter.Report(checkupStatus.Status)
+}
+
+func formatResults(checkupStatus status.Status) map[string]string {
+	var emptyResults status.Results
+	if checkupStatus.Results == emptyResults {
+		return map[string]string{}
+	}
+
+	formattedResults := map[string]string{
+		HasDefaultStorageClassKey: strconv.FormatBool(checkupStatus.Results.HasDefaultStorageClass),
+	}
+
+	return formattedResults
+}
