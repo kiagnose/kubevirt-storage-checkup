@@ -24,7 +24,11 @@ import (
 )
 
 type Results struct {
-	HasDefaultStorageClass bool
+	DefaultStorageClass                       string
+	StorageProfilesWithEmptyClaimPropertySets string
+	StorageProfilesWithSpecClaimPropertySets  string
+	StorageWithRWX                            string
+	StorageMissingVolumeSnapshotClass         string
 }
 
 type Status struct {

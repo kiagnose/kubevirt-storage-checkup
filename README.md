@@ -1,7 +1,6 @@
 # kubevirt-storage-checkup
 
-This checkup performs storage checks, validating storage is working correctly for virtual machines.
-The checkup is using the Kiagnose engine
+This checkup performs storage checks, validating storage is working correctly for virtual machines. The checkup is using the Kiagnose engine.
 
 ## Permissions
 
@@ -101,9 +100,9 @@ spec:
 
 You can create all needed manifests (permissions, ConfigMap, Job) with:
 ```bash
-export CHECKUP_IMAGE_NAME=quay.io/agilboa/kubevirt-storage-checkup
-export CHECKUP_IMAGE_TAG=devel
-export CHECKUP_NAMESPACE=test
+export CHECKUP_IMAGE_NAME=quay.io/kiagnose/kubevirt-storage-checkup (or other image)
+export CHECKUP_IMAGE_TAG=main (or other tag)
+export CHECKUP_NAMESPACE=<target-namespace>
 
 envsubst < manifests/storage_checkup.yaml | kubectl apply -f -
 ```
@@ -119,3 +118,19 @@ After the checkup Job had completed, the results are made available at the user-
 ```bash
 kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 ```
+  status.failureReason: ""
+  status.result.hasDefaultStorageClass: "true"
+  status.startTimestamp: "2023-06-30T14:38:53Z"
+  status.succeeded: "true"
+
+| Key                                              | Description                                                       | Remarks  |
+|--------------------------------------------------|-------------------------------------------------------------------|----------|
+| status.succeeded                                 | Has the checkup succeeded                                         |          |
+| status.failureReason                             | Failure reason in case of a failure                               |          |
+| status.startTimestamp                            | Checkup start timestamp                                           | RFC 3339 |
+| status.completionTimestamp                       | Checkup completion timestamp                                      | RFC 3339 |
+| status.result.defaultStorageClass                | Indicates whether there is a default storage class                |          |
+| status.result.storageProfilesWithEmptyClaimPropertySets | StorageProfiles with empty claimPropertySets (unknown provisioners) |          |
+| status.result.storageProfilesWithSpecClaimPropertySets  | StorageProfiles with spec-overrriden claimPropertySets              |          |
+| status.result.storageWithRWX                     | Storage with RWX access mode                                        |          |
+| status.result.storageMissingVolumeSnapshotClass  | Storage using snapshot-based clone but missing VolumeSnapshotClass  |          |

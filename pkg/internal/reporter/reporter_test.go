@@ -66,17 +66,25 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 		checkupStatus.FailureReason = []string{}
 		checkupStatus.CompletionTimestamp = time.Now()
 		checkupStatus.Results = status.Results{
-			HasDefaultStorageClass: true,
+			DefaultStorageClass:                       "test_sc",
+			StorageProfilesWithEmptyClaimPropertySets: "sc1, sc2",
+			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
+			StorageWithRWX:                            "sc5, sc6",
+			StorageMissingVolumeSnapshotClass:         "sc7, sc8",
 		}
 
 		assert.NoError(t, testReporter.Report(checkupStatus))
 
 		expectedReportData := map[string]string{
-			"status.succeeded":                     strconv.FormatBool(true),
-			"status.failureReason":                 "",
-			"status.startTimestamp":                timestamp(checkupStatus.StartTimestamp),
-			"status.completionTimestamp":           timestamp(checkupStatus.CompletionTimestamp),
-			"status.result.hasDefaultStorageClass": strconv.FormatBool(checkupStatus.Results.HasDefaultStorageClass),
+			"status.succeeded":                                        strconv.FormatBool(true),
+			"status.failureReason":                                    "",
+			"status.startTimestamp":                                   timestamp(checkupStatus.StartTimestamp),
+			"status.completionTimestamp":                              timestamp(checkupStatus.CompletionTimestamp),
+			"status.result.defaultStorageClass":                       checkupStatus.Results.DefaultStorageClass,
+			"status.result.storageProfilesWithEmptyClaimPropertySets": checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
+			"status.result.storageProfilesWithSpecClaimPropertySets":  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
+			"status.result.storageWithRWX":                            checkupStatus.Results.StorageWithRWX,
+			"status.result.storageMissingVolumeSnapshotClass":         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
 		}
 
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
