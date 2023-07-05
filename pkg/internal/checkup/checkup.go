@@ -117,6 +117,10 @@ func (c *Checkup) checkStorageProfilesWithEmptyClaimPropertySets(sps *cdiv1.Stor
 	spNames := ""
 	for i := range sps.Items {
 		sp := &sps.Items[i]
+		if sp.Status.Provisioner == nil ||
+			*sp.Status.Provisioner == "kubernetes.io/no-provisioner" {
+			continue
+		}
 		cpSets := sp.Status.ClaimPropertySets
 		if len(cpSets) == 0 {
 			appendSep(&spNames, sp.Name, ", ")
@@ -132,7 +136,7 @@ func (c *Checkup) checkStorageProfilesWithSpecClaimPropertySets(sps *cdiv1.Stora
 	spNames := ""
 	for i := range sps.Items {
 		sp := &sps.Items[i]
-		cpSets := sp.Status.ClaimPropertySets
+		cpSets := sp.Spec.ClaimPropertySets
 		if len(cpSets) != 0 {
 			appendSep(&spNames, sp.Name, ", ")
 		}
