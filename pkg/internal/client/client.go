@@ -26,7 +26,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 	"kubevirt.io/client-go/kubecli"
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 )
 
 type Client struct {
@@ -49,4 +51,12 @@ func New() (*Client, error) {
 
 func (c *Client) ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error) {
 	return c.KubevirtClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+}
+
+func (c *Client) ListStorageProfiles(ctx context.Context) (*cdiv1.StorageProfileList, error) {
+	return c.KubevirtClient.CdiClient().CdiV1beta1().StorageProfiles().List(ctx, metav1.ListOptions{})
+}
+
+func (c *Client) ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv1.VolumeSnapshotClassList, error) {
+	return c.KubevirtClient.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshotClasses().List(ctx, metav1.ListOptions{})
 }

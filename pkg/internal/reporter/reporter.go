@@ -20,8 +20,6 @@
 package reporter
 
 import (
-	"strconv"
-
 	"k8s.io/client-go/kubernetes"
 
 	kreporter "github.com/kiagnose/kiagnose/kiagnose/reporter"
@@ -30,7 +28,11 @@ import (
 )
 
 const (
-	HasDefaultStorageClassKey = "hasDefaultStorageClass"
+	DefaultStorageClassKey                       = "defaultStorageClass"
+	StorageProfilesWithEmptyClaimPropertySetsKey = "storageProfilesWithEmptyClaimPropertySets"
+	StorageProfilesWithSpecClaimPropertySetsKey  = "storageProfilesWithSpecClaimPropertySets"
+	StorageWithRWXKey                            = "storageWithRWX"
+	StorageMissingVolumeSnapshotClassKey         = "storageMissingVolumeSnapshotClass"
 )
 
 type Reporter struct {
@@ -43,7 +45,7 @@ func New(c kubernetes.Interface, configMapNamespace, configMapName string) *Repo
 }
 
 func (r *Reporter) Report(checkupStatus status.Status) error {
-	if !r.HasData() {
+	if !r.Reporter.HasData() {
 		return r.Reporter.Report(checkupStatus.Status)
 	}
 
@@ -61,7 +63,11 @@ func formatResults(checkupStatus status.Status) map[string]string {
 	}
 
 	formattedResults := map[string]string{
-		HasDefaultStorageClassKey: strconv.FormatBool(checkupStatus.Results.HasDefaultStorageClass),
+		DefaultStorageClassKey:                       checkupStatus.Results.DefaultStorageClass,
+		StorageProfilesWithEmptyClaimPropertySetsKey: checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
+		StorageProfilesWithSpecClaimPropertySetsKey:  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
+		StorageWithRWXKey:                            checkupStatus.Results.StorageWithRWX,
+		StorageMissingVolumeSnapshotClassKey:         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
 	}
 
 	return formattedResults

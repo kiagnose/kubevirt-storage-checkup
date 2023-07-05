@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/kiagnose/kiagnose v0.2.1-0.20221208132946-95d8c7995fab
+	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0
 	github.com/onsi/ginkgo/v2 v2.7.0
 	github.com/onsi/gomega v1.24.2
 	github.com/stretchr/testify v1.7.1
@@ -11,6 +12,7 @@ require (
 	k8s.io/apimachinery v0.23.5
 	k8s.io/client-go v12.0.0+incompatible
 	kubevirt.io/client-go v0.58.0
+	kubevirt.io/containerized-data-importer-api v1.50.0
 )
 
 require (
@@ -32,7 +34,6 @@ require (
 	github.com/imdario/mergo v0.3.10 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/k8snetworkplumbingwg/network-attachment-definition-client v0.0.0-20191119172530-79f836b90111 // indirect
-	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/openshift/api v0.0.0-20210105115604-44119421ec6b // indirect
@@ -58,7 +59,6 @@ require (
 	k8s.io/kube-openapi v0.0.0-20220124234850-424119656bbf // indirect
 	k8s.io/utils v0.0.0-20211116205334-6203023598ed // indirect
 	kubevirt.io/api v0.0.0-20221013011232-17665f214e18 // indirect
-	kubevirt.io/containerized-data-importer-api v1.50.0 // indirect
 	kubevirt.io/controller-lifecycle-operator-sdk/api v0.0.0-20220329064328-f3cc58c6ed90 // indirect
 	sigs.k8s.io/json v0.0.0-20211020170558-c049b76a60c6 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.1 // indirect
