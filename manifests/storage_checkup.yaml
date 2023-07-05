@@ -28,6 +28,28 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-storage-checker-volumesnapshotclasses
+rules:
+- apiGroups: [ "snapshot.storage.k8s.io" ]
+  resources: [ "volumesnapshotclasses" ]
+  verbs: [ "get", "list" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-storage-checker-volumesnapshotclasses
+subjects:
+- kind: ServiceAccount
+  name: storage-checkup-sa
+  namespace: $CHECKUP_NAMESPACE
+roleRef:
+  kind: ClusterRole
+  name: kubevirt-storage-checker-volumesnapshotclasses
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kiagnose-configmap-access

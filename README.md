@@ -35,6 +35,28 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-storage-checker-volumesnapshotclasses
+rules:
+- apiGroups: [ "snapshot.storage.k8s.io" ]
+  resources: [ "volumesnapshotclasses" ]
+  verbs: [ "get", "list" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-storage-checker-volumesnapshotclasses
+subjects:
+- kind: ServiceAccount
+  name: storage-checkup-sa
+  namespace: <target-namespace>
+roleRef:
+  kind: ClusterRole
+  name: kubevirt-storage-checker-volumesnapshotclasses
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kiagnose-configmap-access
@@ -118,11 +140,6 @@ After the checkup Job had completed, the results are made available at the user-
 ```bash
 kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 ```
-  status.failureReason: ""
-  status.result.hasDefaultStorageClass: "true"
-  status.startTimestamp: "2023-06-30T14:38:53Z"
-  status.succeeded: "true"
-
 | Key                                              | Description                                                       | Remarks  |
 |--------------------------------------------------|-------------------------------------------------------------------|----------|
 | status.succeeded                                 | Has the checkup succeeded                                         |          |
