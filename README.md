@@ -4,13 +4,15 @@ This checkup performs storage checks, validating storage is working correctly fo
 
 ## Permissions
 
-The checkup requires the following permissions:
+Cluster admin should create the following permissions and/for dedicated storage checkup ServiceAccount and namespace:
+
 ```yaml
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: storage-checkup-sa
+  namespace: <target-namespace>
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -60,6 +62,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kiagnose-configmap-access
+  namespace: <target-namespace>
 rules:
 - apiGroups: [ "" ]
   resources: [ "configmaps" ]
@@ -69,6 +72,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kiagnose-configmap-access
+  namespace: <target-namespace>
 subjects:
 - kind: ServiceAccount
   name: storage-checkup-sa
@@ -91,6 +95,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: storage-checkup-config
+  namespace: <target-namespace>
 data:
   spec.timeout: 5m
 ```
@@ -103,6 +108,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: storage-checkup
+  namespace: <target-namespace>
 spec:
   backoffLimit: 0
   template:
@@ -120,16 +126,15 @@ spec:
               value: storage-checkup-config
 ```
 
-You can create all needed manifests (permissions, ConfigMap, Job) with:
+You can create the permissions, ConfigMap and Job with:
 ```bash
-export CHECKUP_IMAGE_NAME=quay.io/kiagnose/kubevirt-storage-checkup (or other image)
-export CHECKUP_IMAGE_TAG=main (or other tag)
 export CHECKUP_NAMESPACE=<target-namespace>
 
+envsubst < manifests/storage_checkup_permissions.yaml | kubectl apply -f -
 envsubst < manifests/storage_checkup.yaml | kubectl apply -f -
 ```
 
-and delete them using:
+and cleanup the ConfigMap and Job:
 ```bash
 envsubst < manifests/storage_checkup.yaml | kubectl delete -f -
 ```
