@@ -17,17 +17,27 @@
  *
  */
 
-package config
+package checkup
 
 import (
-	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/vmi"
+
+	corev1 "k8s.io/api/core/v1"
+
+	kvcorev1 "kubevirt.io/api/core/v1"
 )
 
-// FIXME: pass something here - maybe golden image ns?
-type Config struct {
-}
+const (
+	guestMemory                   = "2Gi"
+	rootDiskName                  = "rootdisk"
+	terminationGracePeriodSeconds = 0
+)
 
-func New(baseConfig kconfig.Config) (Config, error) {
-	newConfig := Config{}
-	return newConfig, nil
+func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim) *kvcorev1.VirtualMachine {
+	optionsToApply := []vmi.Option{
+		vmi.WithDataVolume(rootDiskName, pvc),
+		vmi.WithMemory(guestMemory),
+		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
+	}
+	return vmi.NewVM(name, optionsToApply...)
 }

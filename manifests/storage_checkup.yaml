@@ -5,7 +5,7 @@ metadata:
   name: storage-checkup-config
   namespace: $CHECKUP_NAMESPACE
 data:
-  spec.timeout: 5m
+  spec.timeout: 10m
 ---
 apiVersion: batch/v1
 kind: Job
@@ -21,6 +21,7 @@ spec:
       containers:
         - name: storage-checkup
           image: quay.io/kiagnose/kubevirt-storage-checkup:main
+          #image: quay.io/agilboa/kubevirt-storage-checkup:devel
           imagePullPolicy: Always
           env:
             - name: CONFIGMAP_NAMESPACE

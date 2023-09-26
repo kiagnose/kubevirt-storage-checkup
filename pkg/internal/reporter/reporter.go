@@ -33,6 +33,13 @@ const (
 	StorageProfilesWithSpecClaimPropertySetsKey  = "storageProfilesWithSpecClaimPropertySets"
 	StorageWithRWXKey                            = "storageWithRWX"
 	StorageMissingVolumeSnapshotClassKey         = "storageMissingVolumeSnapshotClass"
+	GoldenImagesNotUpToDateKey                   = "goldenImagesNotUpToDate"
+	VMsWithNonVirtRbdStorageClassKey             = "vmsWithNonVirtRbdStorageClass"
+	VMsWithUnsetEfsStorageClassKey               = "vmsWithUnsetEfsStorageClass"
+	VMBootFromGoldenImageKey                     = "vmBootFromGoldenImage"
+	VMVolumeCloneKey                             = "vmVolumeClone"
+	VMLiveMigrationKey                           = "vmLiveMigration"
+	VMHotplugVolumeKey                           = "vmHotplugVolume"
 )
 
 type Reporter struct {
@@ -68,6 +75,13 @@ func formatResults(checkupStatus status.Status) map[string]string {
 		StorageProfilesWithSpecClaimPropertySetsKey:  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
 		StorageWithRWXKey:                            checkupStatus.Results.StorageWithRWX,
 		StorageMissingVolumeSnapshotClassKey:         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
+		GoldenImagesNotUpToDateKey:                   checkupStatus.Results.GoldenImagesNotUpToDate,
+		VMsWithNonVirtRbdStorageClassKey:             checkupStatus.Results.VMsWithNonVirtRbdStorageClass,
+		VMsWithUnsetEfsStorageClassKey:               checkupStatus.Results.VMsWithUnsetEfsStorageClass,
+		VMBootFromGoldenImageKey:                     checkupStatus.Results.VMBootFromGoldenImage,
+		VMVolumeCloneKey:                             checkupStatus.Results.VMVolumeClone,
+		VMLiveMigrationKey:                           checkupStatus.Results.VMLiveMigration,
+		VMHotplugVolumeKey:                           checkupStatus.Results.VMHotplugVolume,
 	}
 
 	return formattedResults

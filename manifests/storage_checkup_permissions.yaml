@@ -71,3 +71,39 @@ roleRef:
   kind: Role
   name: kiagnose-configmap-access
   apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubevirt-storage-checker
+  namespace: $CHECKUP_NAMESPACE
+rules:
+  - apiGroups: [ "kubevirt.io" ]
+    resources: [ "virtualmachines" ]
+    verbs: [ "create", "delete" ]
+  - apiGroups: [ "kubevirt.io" ]
+    resources: [ "virtualmachineinstances" ]
+    verbs: [ "get" ]
+  - apiGroups: [ "subresources.kubevirt.io" ]
+    resources: [ "virtualmachineinstances/addvolume", "virtualmachineinstances/removevolume" ]
+    verbs: [ "update" ]
+  - apiGroups: [ "kubevirt.io" ]
+    resources: [ "virtualmachineinstancemigrations" ]
+    verbs: [ "create" ]
+  - apiGroups: [ "" ]
+    resources: [ "persistentvolumeclaims" ]
+    verbs: [ "create", "delete" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubevirt-storage-checker
+  namespace: $CHECKUP_NAMESPACE
+subjects:
+  - kind: ServiceAccount
+    name: storage-checkup-sa
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubevirt-storage-checker
