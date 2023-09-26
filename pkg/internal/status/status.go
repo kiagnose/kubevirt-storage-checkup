@@ -29,6 +29,13 @@ type Results struct {
 	StorageProfilesWithSpecClaimPropertySets  string
 	StorageWithRWX                            string
 	StorageMissingVolumeSnapshotClass         string
+	GoldenImagesNotUpToDate                   string
+	VMsWithNonVirtRbdStorageClass             string
+	VMsWithUnsetEfsStorageClass               string
+	VMBootFromGoldenImage                     string
+	VMVolumeClone                             string
+	VMLiveMigration                           string
+	VMHotplugVolume                           string
 }
 
 type Status struct {

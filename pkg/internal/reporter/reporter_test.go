@@ -71,6 +71,13 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
 			StorageWithRWX:                            "sc5, sc6",
 			StorageMissingVolumeSnapshotClass:         "sc7, sc8",
+			GoldenImagesNotUpToDate:                   "dic1, dic2",
+			VMsWithNonVirtRbdStorageClass:             "vm1,vm2",
+			VMsWithUnsetEfsStorageClass:               "vm3,vm4",
+			VMBootFromGoldenImage:                     "ok",
+			VMVolumeClone:                             "snapshot",
+			VMLiveMigration:                           "success",
+			VMHotplugVolume:                           "fail",
 		}
 
 		assert.NoError(t, testReporter.Report(checkupStatus))
@@ -85,6 +92,13 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.result.storageProfilesWithSpecClaimPropertySets":  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
 			"status.result.storageWithRWX":                            checkupStatus.Results.StorageWithRWX,
 			"status.result.storageMissingVolumeSnapshotClass":         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
+			"status.result.goldenImagesNotUpToDate":                   checkupStatus.Results.GoldenImagesNotUpToDate,
+			"status.result.vmsWithNonVirtRbdStorageClass":             checkupStatus.Results.VMsWithNonVirtRbdStorageClass,
+			"status.result.vmsWithUnsetEfsStorageClass":               checkupStatus.Results.VMsWithUnsetEfsStorageClass,
+			"status.result.vmBootFromGoldenImage":                     checkupStatus.Results.VMBootFromGoldenImage,
+			"status.result.vmVolumeClone":                             checkupStatus.Results.VMVolumeClone,
+			"status.result.vmLiveMigration":                           checkupStatus.Results.VMLiveMigration,
+			"status.result.vmHotplugVolume":                           checkupStatus.Results.VMHotplugVolume,
 		}
 
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
