@@ -3,82 +3,15 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: storage-checkup-sa
-  namespace: $CHECKUP_NAMESPACE
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kubevirt-storage-checker
-rules:
-- apiGroups: [ "storage.k8s.io" ]
-  resources: [ "storageclasses" ]
-  verbs: [ "get", "list" ]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubevirt-storage-checker
-subjects:
-- kind: ServiceAccount
-  name: storage-checkup-sa
-  namespace: $CHECKUP_NAMESPACE
-roleRef:
-  kind: ClusterRole
-  name: kubevirt-storage-checker
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: kubevirt-storage-checker-volumesnapshotclasses
-rules:
-- apiGroups: [ "snapshot.storage.k8s.io" ]
-  resources: [ "volumesnapshotclasses" ]
-  verbs: [ "get", "list" ]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: kubevirt-storage-checker-volumesnapshotclasses
-subjects:
-- kind: ServiceAccount
-  name: storage-checkup-sa
-  namespace: $CHECKUP_NAMESPACE
-roleRef:
-  kind: ClusterRole
-  name: kubevirt-storage-checker-volumesnapshotclasses
-  apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: kiagnose-configmap-access
-  namespace: $CHECKUP_NAMESPACE
-rules:
-- apiGroups: [ "" ]
-  resources: [ "configmaps" ]
-  verbs: ["get", "update"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: kiagnose-configmap-access
-  namespace: $CHECKUP_NAMESPACE
-subjects:
-- kind: ServiceAccount
-  name: storage-checkup-sa
-roleRef:
-  kind: Role
-  name: kiagnose-configmap-access
-  apiGroup: rbac.authorization.k8s.io
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: kubevirt-storage-checker
-  namespace: $CHECKUP_NAMESPACE
 rules:
+  - apiGroups: [ "" ]
+    resources: [ "configmaps" ]
+    verbs: ["get", "update"]
   - apiGroups: [ "kubevirt.io" ]
     resources: [ "virtualmachines" ]
     verbs: [ "create", "delete" ]
@@ -99,7 +32,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: kubevirt-storage-checker
-  namespace: $CHECKUP_NAMESPACE
 subjects:
   - kind: ServiceAccount
     name: storage-checkup-sa
