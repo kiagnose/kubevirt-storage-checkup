@@ -247,7 +247,11 @@ func (c *Checkup) checkStorageProfiles(sps *cdiv1.StorageProfileList, errStr *st
 
 	for i := range sps.Items {
 		sp := sps.Items[i]
-		if sp.Status.Provisioner == nil || *sp.Status.Provisioner == "kubernetes.io/no-provisioner" {
+		provisioner := sp.Status.Provisioner
+		if provisioner == nil ||
+			*provisioner == "kubernetes.io/no-provisioner" ||
+			*provisioner == "openshift-storage.ceph.rook.io/bucket" ||
+			*provisioner == "openshift-storage.noobaa.io/obc" {
 			continue
 		}
 		if len(sp.Status.ClaimPropertySets) == 0 {

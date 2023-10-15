@@ -20,8 +20,8 @@ spec:
       restartPolicy: Never
       containers:
         - name: storage-checkup
-          image: quay.io/kiagnose/kubevirt-storage-checkup:main
-          #image: quay.io/agilboa/kubevirt-storage-checkup:devel
+          #image: quay.io/kiagnose/kubevirt-storage-checkup:main
+          image: quay.io/agilboa/kubevirt-storage-checkup:devel
           imagePullPolicy: Always
           env:
             - name: CONFIGMAP_NAMESPACE
