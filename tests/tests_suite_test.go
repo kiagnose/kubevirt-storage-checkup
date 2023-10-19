@@ -19,7 +19,7 @@ const (
 )
 
 const (
-	defaultNamespace = "kiagnose-demo"
+	defaultNamespace = "kubevirt-storage-checkup"
 	defaultImageName = "quay.io/kiagnose/kubevirt-storage-checkup:main"
 )
 
