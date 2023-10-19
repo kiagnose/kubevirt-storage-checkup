@@ -35,10 +35,10 @@ import (
 )
 
 const (
-	testServiceAccountName              = "storage-checkup-sa"
-	testKiagnoseConfigMapAccessRoleName = "kiagnose-configmap-access"
-	testConfigMapName                   = "storage-checkup-config"
-	testCheckupJobName                  = "storage-checkup"
+	testServiceAccountName = "storage-checkup-sa"
+	testcheckupRoleName    = "storage-checkup-role"
+	testConfigMapName      = "storage-checkup-config"
+	testCheckupJobName     = "storage-checkup"
 )
 
 var _ = Describe("Checkup execution", func() {
@@ -76,15 +76,20 @@ var _ = Describe("Checkup execution", func() {
 	})
 
 	It("should complete successfully", func() {
-		Eventually(getJobConditions, 5*time.Minute, 5*time.Second).Should(
-			ContainElement(MatchFields(IgnoreExtras, Fields{
-				"Type":   Equal(batchv1.JobComplete),
-				"Status": Equal(corev1.ConditionTrue),
-			})))
+		isCompleted := ContainElement(MatchFields(IgnoreExtras, Fields{
+			"Type":   Equal(batchv1.JobComplete),
+			"Status": Equal(corev1.ConditionTrue),
+		}))
+		isFailed := ContainElement(MatchFields(IgnoreExtras, Fields{
+			"Type":   Equal(batchv1.JobFailed),
+			"Status": Equal(corev1.ConditionTrue),
+		}))
+
+		Eventually(getJobConditions, 10*time.Minute, 5*time.Second).Should(Or(isCompleted, isFailed))
+		Expect(getJobConditions()).Should(isCompleted)
 
 		configMap, err := client.CoreV1().ConfigMaps(testNamespace).Get(context.Background(), testConfigMapName, metav1.GetOptions{})
 		Expect(err).NotTo(HaveOccurred())
-
 		Expect(configMap.Data).NotTo(BeNil())
 		Expect(configMap.Data["status.succeeded"]).To(Equal("true"), fmt.Sprintf("should succeed %+v", configMap.Data))
 		Expect(configMap.Data["status.failureReason"]).To(BeEmpty(), fmt.Sprintf("should be empty %+v", configMap.Data))
@@ -93,14 +98,13 @@ var _ = Describe("Checkup execution", func() {
 
 func setupCheckupPermissions() {
 	var (
-		err                                error
-		checkupServiceAccount              *corev1.ServiceAccount
-		kiagnoseConfigMapAccessRole        *rbacv1.Role
-		kiagnoseConfigMapAccessRoleBinding *rbacv1.RoleBinding
+		checkupServiceAccount *corev1.ServiceAccount
+		checkupRole           *rbacv1.Role
+		checkupRoleBinding    *rbacv1.RoleBinding
 	)
 
 	checkupServiceAccount = newServiceAccount()
-	checkupServiceAccount, err = client.CoreV1().ServiceAccounts(testNamespace).Create(
+	checkupServiceAccount, err := client.CoreV1().ServiceAccounts(testNamespace).Create(
 		context.Background(),
 		checkupServiceAccount,
 		metav1.CreateOptions{},
@@ -116,39 +120,39 @@ func setupCheckupPermissions() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	kiagnoseConfigMapAccessRole = newKiagnoseConfigMapAccessRole()
-	kiagnoseConfigMapAccessRole, err = client.RbacV1().Roles(testNamespace).Create(
+	checkupRole = newCheckupRole()
+	checkupRole, err = client.RbacV1().Roles(testNamespace).Create(
 		context.Background(),
-		kiagnoseConfigMapAccessRole,
+		checkupRole,
 		metav1.CreateOptions{},
 	)
 	Expect(err).NotTo(HaveOccurred())
 
 	DeferCleanup(func() {
-		err = client.RbacV1().Roles(kiagnoseConfigMapAccessRole.Namespace).Delete(
+		err = client.RbacV1().Roles(checkupRole.Namespace).Delete(
 			context.Background(),
-			kiagnoseConfigMapAccessRole.Name,
+			checkupRole.Name,
 			metav1.DeleteOptions{},
 		)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	kiagnoseConfigMapAccessRoleBinding = newRoleBinding(
-		kiagnoseConfigMapAccessRole.Name,
+	checkupRoleBinding = newRoleBinding(
+		checkupRole.Name,
 		checkupServiceAccount.Name,
-		kiagnoseConfigMapAccessRole.Name,
+		checkupRole.Name,
 	)
-	kiagnoseConfigMapAccessRoleBinding, err = client.RbacV1().RoleBindings(testNamespace).Create(
+	checkupRoleBinding, err = client.RbacV1().RoleBindings(testNamespace).Create(
 		context.Background(),
-		kiagnoseConfigMapAccessRoleBinding,
+		checkupRoleBinding,
 		metav1.CreateOptions{},
 	)
 	Expect(err).NotTo(HaveOccurred())
 
 	DeferCleanup(func() {
-		err = client.RbacV1().RoleBindings(kiagnoseConfigMapAccessRoleBinding.Namespace).Delete(
+		err := client.RbacV1().RoleBindings(checkupRoleBinding.Namespace).Delete(
 			context.Background(),
-			kiagnoseConfigMapAccessRoleBinding.Name,
+			checkupRoleBinding.Name,
 			metav1.DeleteOptions{},
 		)
 		Expect(err).NotTo(HaveOccurred())
@@ -163,16 +167,41 @@ func newServiceAccount() *corev1.ServiceAccount {
 	}
 }
 
-func newKiagnoseConfigMapAccessRole() *rbacv1.Role {
+func newCheckupRole() *rbacv1.Role {
 	return &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: testKiagnoseConfigMapAccessRoleName,
+			Name: testcheckupRoleName,
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{""},
 				Resources: []string{"configmaps"},
 				Verbs:     []string{"get", "update"},
+			},
+			{
+				APIGroups: []string{"kubevirt.io"},
+				Resources: []string{"virtualmachines"},
+				Verbs:     []string{"create", "delete"},
+			},
+			{
+				APIGroups: []string{"kubevirt.io"},
+				Resources: []string{"virtualmachineinstances"},
+				Verbs:     []string{"get"},
+			},
+			{
+				APIGroups: []string{"subresources.kubevirt.io"},
+				Resources: []string{"virtualmachineinstances/addvolume", "virtualmachineinstances/removevolume"},
+				Verbs:     []string{"update"},
+			},
+			{
+				APIGroups: []string{"kubevirt.io"},
+				Resources: []string{"virtualmachineinstancemigrations"},
+				Verbs:     []string{"create"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"persistentvolumeclaims"},
+				Verbs:     []string{"create", "delete"},
 			},
 		},
 	}

@@ -339,10 +339,13 @@ func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceLis
 		ns := namespaces.Items[i]
 		vmis, err := c.client.ListVirtualMachinesInstances(ctx, ns.Name)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed ListVirtualMachinesInstances: %s", err)
 		}
 		for i := range vmis.Items {
 			vmi := vmis.Items[i]
+			if vmi.Status.Phase != kvcorev1.Running {
+				continue
+			}
 			hasNonVirtRbdSC, hasUnsetEfsSC, err := c.checkVMIVolumes(ctx, &vmi, virtSC, unsetEfsSC)
 			if err != nil {
 				return err
@@ -378,7 +381,7 @@ func (c *Checkup) getVirtStorageClass(scs *storagev1.StorageClassList) (*string,
 			sc.Parameters["mounter"] == "rbd" &&
 			sc.Parameters["mapOptions"] == "krbd:rxbounce" {
 			if virtSC != nil {
-				return nil, fmt.Errorf("multiple virt StorageClasses")
+				return nil, errors.New("multiple virt StorageClasses")
 			}
 			virtSC = &sc.Name
 		}
@@ -393,7 +396,7 @@ func (c *Checkup) getUnsetEfsStorageClass(scs *storagev1.StorageClassList) (*str
 		if strings.Contains(sc.Provisioner, "efs.csi.aws.com") &&
 			(sc.Parameters["uid"] == "" || sc.Parameters["gid"] == "") {
 			if unsetEfsSC != nil {
-				return nil, fmt.Errorf("multiple unset EFS StorageClasses")
+				return nil, errors.New("multiple unset EFS StorageClasses")
 			}
 			unsetEfsSC = &sc.Name
 		}
@@ -431,11 +434,11 @@ func (c *Checkup) getVolumePV(ctx context.Context, vol kvcorev1.Volume, namespac
 	}
 	pvc, err := c.client.GetPersistentVolumeClaim(ctx, namespace, pvcName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed GetPersistentVolumeClaim: %s", err)
 	}
 	pv, err := c.client.GetPersistentVolume(ctx, pvc.Spec.VolumeName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed GetPersistentVolume: %s", err)
 	}
 	return pv, nil
 }
@@ -543,7 +546,7 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 					return true, nil
 				}
 				if ms.Failed {
-					return false, fmt.Errorf("migration failed")
+					return false, errors.New("migration failed")
 				}
 			}
 			return false, nil
