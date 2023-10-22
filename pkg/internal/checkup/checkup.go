@@ -358,7 +358,8 @@ func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceLis
 
 	if vmisWithNonVirtRbdSC != "" {
 		c.results.VMsWithNonVirtRbdStorageClass = vmisWithNonVirtRbdSC
-		appendSep(errStr, errVMsWithNonVirtRbdStorageClass)
+		// FIXME: not sure the checkup should fail on this one
+		// appendSep(errStr, errVMsWithNonVirtRbdStorageClass)
 	}
 	if vmisWithUnsetEfsSC != "" {
 		c.results.VMsWithUnsetEfsStorageClass = vmisWithUnsetEfsSC
