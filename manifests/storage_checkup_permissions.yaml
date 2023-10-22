@@ -17,7 +17,7 @@ rules:
     verbs: [ "create", "delete" ]
   - apiGroups: [ "kubevirt.io" ]
     resources: [ "virtualmachineinstances" ]
-    verbs: [ "get" ]
+    verbs: [ "create", "get", "delete" ]
   - apiGroups: [ "subresources.kubevirt.io" ]
     resources: [ "virtualmachineinstances/addvolume", "virtualmachineinstances/removevolume" ]
     verbs: [ "update" ]
