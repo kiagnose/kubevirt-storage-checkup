@@ -30,7 +30,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -54,8 +53,8 @@ type kubeVirtStorageClient interface {
 	AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string, addVolumeOptions *kvcorev1.AddVolumeOptions) error
 	RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
 		removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error
-	CreatePersistentVolumeClaim(ctx context.Context, namespace string, pvc *corev1.PersistentVolumeClaim) (
-		*corev1.PersistentVolumeClaim, error)
+	CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error)
+	DeleteDataVolume(ctx context.Context, namespace, name string) error
 	DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error
 	ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error)
 	ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error)
@@ -65,6 +64,7 @@ type kubeVirtStorageClient interface {
 	ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error)
 	GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error)
 	GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error)
+	GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error)
 	GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error)
 }
 
@@ -86,6 +86,7 @@ const (
 type Checkup struct {
 	client         kubeVirtStorageClient
 	namespace      string
+	goldenImageSc  *string
 	goldenImagePvc *corev1.PersistentVolumeClaim
 	vmUnderTest    *kvcorev1.VirtualMachine
 	results        status.Results
@@ -117,13 +118,12 @@ func (c *Checkup) Run(ctx context.Context) error {
 		return err
 	}
 
-	c.checkStorageProfiles(sps, &errStr)
-
 	vscs, err := c.client.ListVolumeSnapshotClasses(ctx)
 	if err != nil {
 		return err
 	}
 
+	c.checkStorageProfiles(ctx, sps, vscs, &errStr)
 	c.checkVolumeSnapShotClasses(sps, vscs, &errStr)
 
 	nss, err := c.client.ListNamespaces(ctx)
@@ -157,6 +157,7 @@ func (c *Checkup) Run(ctx context.Context) error {
 
 func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
 	log.Print("checkGoldenImages")
+
 	dicNames := ""
 	for i := range namespaces.Items {
 		ns := namespaces.Items[i]
@@ -182,15 +183,18 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 			if c.goldenImagePvc != nil {
 				continue
 			}
-			// FIXME: check pvc - RWX, smart clone
+
 			srcPvc := das.Spec.Source.PVC
 			pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
 			if err != nil {
 				return err
 			}
-			c.goldenImagePvc = pvc
-			log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
-				pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+
+			if sc := pvc.Spec.StorageClassName; sc != nil && c.goldenImageSc != nil && *sc == *c.goldenImageSc {
+				c.goldenImagePvc = pvc
+				log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
+					pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+			}
 		}
 	}
 
@@ -223,6 +227,7 @@ func isDataSourceReady(conditions []cdiv1.DataSourceCondition) bool {
 
 func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errStr *string) {
 	log.Print("checkDefaultStorageClass")
+
 	for i := range scs.Items {
 		sc := scs.Items[i]
 		if sc.Annotations[annDefaultStorageClass] == "true" {
@@ -240,13 +245,39 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 	}
 }
 
-// FIXME: set default sc
-func (c *Checkup) checkStorageProfiles(sps *cdiv1.StorageProfileList, errStr *string) {
-	log.Print("checkStorageProfiles")
+// FIXME: check default SC hasSmartCloneAndRWX, and if not report the problem
+func (c *Checkup) hasSmartCloneAndRWX(ctx context.Context, sp *cdiv1.StorageProfile, vscs *snapshotv1.VolumeSnapshotClassList) bool {
+	if !hasRWX(sp.Status.ClaimPropertySets) {
+		return false
+	}
+
+	strategy := sp.Status.CloneStrategy
+	provisioner := sp.Status.Provisioner
+
+	if strategy != nil {
+		if *strategy == cdiv1.CloneStrategyHostAssisted {
+			return false
+		}
+		if *strategy == cdiv1.CloneStrategyCsiClone && provisioner != nil {
+			_, err := c.client.GetCSIDriver(ctx, *provisioner)
+			return err == nil
+		}
+	}
+
+	if (strategy == nil || *strategy == cdiv1.CloneStrategySnapshot) && provisioner != nil {
+		return hasDriver(vscs, *provisioner)
+	}
+
+	return false
+}
+
+func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StorageProfileList,
+	vscs *snapshotv1.VolumeSnapshotClassList, errStr *string) {
 	var spWithEmptyClaimPropertySets, spWithSpecClaimPropertySets, spWithRWX string
 
+	log.Print("checkStorageProfiles")
 	for i := range sps.Items {
-		sp := sps.Items[i]
+		sp := &sps.Items[i]
 		provisioner := sp.Status.Provisioner
 		if provisioner == nil ||
 			*provisioner == "kubernetes.io/no-provisioner" ||
@@ -254,6 +285,14 @@ func (c *Checkup) checkStorageProfiles(sps *cdiv1.StorageProfileList, errStr *st
 			*provisioner == "openshift-storage.noobaa.io/obc" {
 			continue
 		}
+
+		sc := sp.Status.StorageClass
+		if c.goldenImageSc == nil || (sc != nil && *sc == c.results.DefaultStorageClass) {
+			if c.hasSmartCloneAndRWX(ctx, sp, vscs) {
+				c.goldenImageSc = sc
+			}
+		}
+
 		if len(sp.Status.ClaimPropertySets) == 0 {
 			appendSep(&spWithEmptyClaimPropertySets, sp.Name)
 		}
@@ -292,20 +331,21 @@ func hasRWX(cpSets []cdiv1.ClaimPropertySet) bool {
 
 func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs *snapshotv1.VolumeSnapshotClassList, errStr *string) {
 	log.Print("checkVolumeSnapShotClasses")
+
 	spNames := ""
 	for i := range sps.Items {
 		sp := sps.Items[i]
-		if sp.Status.CloneStrategy != nil &&
-			*sp.Status.CloneStrategy == cdiv1.CloneStrategySnapshot &&
-			sp.Status.Provisioner != nil {
-			if !hasDriver(vscs, *sp.Status.Provisioner) {
-				appendSep(&spNames, sp.Name)
-			}
+		strategy := sp.Status.CloneStrategy
+		provisioner := sp.Status.Provisioner
+		if (strategy == nil || *strategy == cdiv1.CloneStrategySnapshot) &&
+			provisioner != nil && !hasDriver(vscs, *provisioner) {
+			appendSep(&spNames, sp.Name)
 		}
 	}
 	if spNames != "" {
 		c.results.StorageMissingVolumeSnapshotClass = spNames
-		appendSep(errStr, errMissingVolumeSnapshotClass)
+		// FIXME: not sure the checkup should fail on this one
+		// appendSep(errStr, errMissingVolumeSnapshotClass)
 	}
 }
 
@@ -346,6 +386,7 @@ func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceLis
 			if vmi.Status.Phase != kvcorev1.Running {
 				continue
 			}
+
 			hasNonVirtRbdSC, hasUnsetEfsSC, err := c.checkVMIVolumes(ctx, &vmi, virtSC, unsetEfsSC)
 			if err != nil {
 				return err
@@ -460,13 +501,15 @@ func (c *Checkup) Teardown(ctx context.Context) error {
 		return nil
 	}
 
-	err := c.client.DeleteVirtualMachine(ctx, c.namespace, c.vmUnderTest.Name)
-	if ignoreNotFound(err) != nil {
+	if err := c.client.DeleteVirtualMachine(ctx, c.namespace, c.vmUnderTest.Name); ignoreNotFound(err) != nil {
 		return fmt.Errorf("teardown: %v", err)
 	}
 
-	err = c.client.DeletePersistentVolumeClaim(ctx, c.namespace, hotplugVolumeName)
-	if ignoreNotFound(err) != nil {
+	if err := c.client.DeleteDataVolume(ctx, c.namespace, hotplugVolumeName); ignoreNotFound(err) != nil {
+		return fmt.Errorf("teardown: %v", err)
+	}
+
+	if err := c.client.DeletePersistentVolumeClaim(ctx, c.namespace, hotplugVolumeName); ignoreNotFound(err) != nil {
 		return fmt.Errorf("teardown: %v", err)
 	}
 
@@ -478,8 +521,9 @@ func (c *Checkup) Results() status.Results {
 }
 
 func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
-	log.Print("checkVMICreation")
 	const randomStringLen = 5
+
+	log.Print("checkVMICreation")
 	vmName := fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
 	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc)
 	log.Printf("Creating VM %q", vmName)
@@ -560,24 +604,24 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) error {
 	log.Print("checkVMIHotplugVolume")
 
-	// FIXME: use default SC instead
-	pvc := &corev1.PersistentVolumeClaim{
+	dv := &cdiv1.DataVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hotplugVolumeName,
 		},
-		Spec: corev1.PersistentVolumeClaimSpec{
-			StorageClassName: c.goldenImagePvc.Spec.StorageClassName,
-			VolumeMode:       c.goldenImagePvc.Spec.VolumeMode,
-			AccessModes:      c.goldenImagePvc.Spec.AccessModes,
-			Resources: corev1.ResourceRequirements{
-				Requests: corev1.ResourceList{
-					corev1.ResourceStorage: resource.MustParse("1Mi"),
+		Spec: cdiv1.DataVolumeSpec{
+			Source: &cdiv1.DataVolumeSource{
+				PVC: &cdiv1.DataVolumeSourcePVC{
+					Namespace: c.goldenImagePvc.Namespace,
+					Name:      c.goldenImagePvc.Name,
 				},
+			},
+			Storage: &cdiv1.StorageSpec{
+				StorageClassName: c.goldenImagePvc.Spec.StorageClassName,
 			},
 		},
 	}
 
-	if _, err := c.client.CreatePersistentVolumeClaim(ctx, c.namespace, pvc); err != nil {
+	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {
 		return err
 	}
 
@@ -591,10 +635,8 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 			},
 		},
 		VolumeSource: &kvcorev1.HotplugVolumeSource{
-			PersistentVolumeClaim: &kvcorev1.PersistentVolumeClaimVolumeSource{
-				PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
-					ClaimName: hotplugVolumeName,
-				},
+			DataVolume: &kvcorev1.DataVolumeSource{
+				Name:         hotplugVolumeName,
 				Hotpluggable: true,
 			},
 		},

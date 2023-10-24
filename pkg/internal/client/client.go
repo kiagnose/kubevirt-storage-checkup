@@ -79,9 +79,12 @@ func (c *Client) RemoveVirtualMachineInstanceVolume(ctx context.Context, namespa
 	return c.KubevirtClient.VirtualMachineInstance(namespace).RemoveVolume(name, removeVolumeOptions)
 }
 
-func (c *Client) CreatePersistentVolumeClaim(ctx context.Context, namespace string, pvc *corev1.PersistentVolumeClaim) (
-	*corev1.PersistentVolumeClaim, error) {
-	return c.KubevirtClient.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{})
+func (c *Client) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {
+	return c.KubevirtClient.CdiClient().CdiV1beta1().DataVolumes(namespace).Create(ctx, dv, metav1.CreateOptions{})
+}
+
+func (c *Client) DeleteDataVolume(ctx context.Context, namespace, name string) error {
+	return c.KubevirtClient.CdiClient().CdiV1beta1().DataVolumes(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 func (c *Client) DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error {
@@ -118,6 +121,10 @@ func (c *Client) GetPersistentVolumeClaim(ctx context.Context, namespace, name s
 
 func (c *Client) GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error) {
 	return c.KubevirtClient.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
+}
+
+func (c *Client) GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error) {
+	return c.KubevirtClient.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
 }
 
 func (c *Client) GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error) {
