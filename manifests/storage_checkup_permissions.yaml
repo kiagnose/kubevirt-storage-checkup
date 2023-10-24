@@ -17,16 +17,19 @@ rules:
     verbs: [ "create", "delete" ]
   - apiGroups: [ "kubevirt.io" ]
     resources: [ "virtualmachineinstances" ]
-    verbs: [ "create", "get", "delete" ]
+    verbs: [ "get" ]
   - apiGroups: [ "subresources.kubevirt.io" ]
     resources: [ "virtualmachineinstances/addvolume", "virtualmachineinstances/removevolume" ]
     verbs: [ "update" ]
   - apiGroups: [ "kubevirt.io" ]
     resources: [ "virtualmachineinstancemigrations" ]
     verbs: [ "create" ]
+  - apiGroups: [ "cdi.kubevirt.io" ]
+    resources: [ "datavolumes" ]
+    verbs: [ "create", "delete" ]
   - apiGroups: [ "" ]
     resources: [ "persistentvolumeclaims" ]
-    verbs: [ "create", "delete" ]
+    verbs: [ "delete" ]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

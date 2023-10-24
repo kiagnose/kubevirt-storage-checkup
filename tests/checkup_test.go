@@ -199,9 +199,14 @@ func newCheckupRole() *rbacv1.Role {
 				Verbs:     []string{"create"},
 			},
 			{
+				APIGroups: []string{"cdi.kubevirt.io"},
+				Resources: []string{"datavolumes"},
+				Verbs:     []string{"create", "delete"},
+			},
+			{
 				APIGroups: []string{""},
 				Resources: []string{"persistentvolumeclaims"},
-				Verbs:     []string{"create", "delete"},
+				Verbs:     []string{"delete"},
 			},
 		},
 	}
