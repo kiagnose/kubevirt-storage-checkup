@@ -413,20 +413,43 @@ func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceLis
 	return nil
 }
 
-// FIXME: check SC name suffix (-ceph-rbd-virtualization) or virt annotation (?). Only one SC should be found and returned.
 func (c *Checkup) getVirtStorageClass(scs *storagev1.StorageClassList) (*string, error) {
 	var virtSC *string
-	for i := range scs.Items {
-		sc := scs.Items[i]
-		if strings.Contains(sc.Provisioner, "rbd.csi.ceph.com") &&
+
+	hasVirtParams := func(sc *storagev1.StorageClass) bool {
+		return strings.Contains(sc.Provisioner, "rbd.csi.ceph.com") &&
 			sc.Parameters["mounter"] == "rbd" &&
-			sc.Parameters["mapOptions"] == "krbd:rxbounce" {
+			sc.Parameters["mapOptions"] == "krbd:rxbounce"
+	}
+
+	// First look for SC named with virtualization suffix
+	for i := range scs.Items {
+		sc := &scs.Items[i]
+		if strings.HasSuffix(sc.Name, "-ceph-rbd-virtualization") {
+			if virtSC != nil {
+				return nil, errors.New("multiple virt StorageClasses")
+			}
+			if hasVirtParams(sc) {
+				virtSC = &sc.Name
+			}
+		}
+	}
+
+	if virtSC != nil {
+		return virtSC, nil
+	}
+
+	// If virt SC not found, look for one with virt params
+	for i := range scs.Items {
+		sc := &scs.Items[i]
+		if hasVirtParams(sc) {
 			if virtSC != nil {
 				return nil, errors.New("multiple virt StorageClasses")
 			}
 			virtSC = &sc.Name
 		}
 	}
+
 	return virtSC, nil
 }
 
