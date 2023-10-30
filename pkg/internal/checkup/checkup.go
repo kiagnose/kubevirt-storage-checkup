@@ -81,12 +81,14 @@ const (
 	errVMsWithNonVirtRbdStorageClass = "There are VMs using the plain RBD storageclass when the virtualization storageclass exists."
 	errVMsWithUnsetEfsStorageClass   = "There are VMs using an EFS storageclass where the gid and uid are not set in the storageclass."
 	errGoldenImagesNotUpToDate       = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
+	messageSkipNoPVC                 = "Skip check - no golden image pvc"
+	messageSkipNoVMI                 = "Skip check - no VMI"
 )
 
 type Checkup struct {
 	client         kubeVirtStorageClient
 	namespace      string
-	goldenImageSc  *string
+	goldenImageScs []string
 	goldenImagePvc *corev1.PersistentVolumeClaim
 	vmUnderTest    *kvcorev1.VirtualMachine
 	results        status.Results
@@ -155,8 +157,10 @@ func (c *Checkup) Run(ctx context.Context) error {
 	return nil
 }
 
+// FIXME: refactor
 func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
 	log.Print("checkGoldenImages")
+	var fallbackPvc, fallbackPvcDefaultSC *corev1.PersistentVolumeClaim
 
 	dicNames := ""
 	for i := range namespaces.Items {
@@ -180,8 +184,11 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 				continue
 			}
 
-			if c.goldenImagePvc != nil {
-				continue
+			// Prefer golden image with default SC
+			if pvc := c.goldenImagePvc; pvc != nil {
+				if sc := pvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
+					continue
+				}
 			}
 
 			srcPvc := das.Spec.Source.PVC
@@ -190,12 +197,30 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 				return err
 			}
 
-			if sc := pvc.Spec.StorageClassName; sc != nil && c.goldenImageSc != nil && *sc == *c.goldenImageSc {
+			sc := pvc.Spec.StorageClassName
+			if sc != nil && contains(c.goldenImageScs, *sc) {
 				c.goldenImagePvc = pvc
-				log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
-					pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+			} else if fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
+				fallbackPvcDefaultSC = pvc
+			} else if fallbackPvc == nil {
+				fallbackPvc = pvc
 			}
 		}
+	}
+
+	if c.goldenImagePvc == nil {
+		if fallbackPvcDefaultSC != nil {
+			c.goldenImagePvc = fallbackPvcDefaultSC
+		} else if fallbackPvc != nil {
+			c.goldenImagePvc = fallbackPvc
+		}
+	}
+
+	if pvc := c.goldenImagePvc; pvc != nil {
+		log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
+			pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+	} else {
+		log.Print("No golden image PVC found")
 	}
 
 	if dicNames != "" {
@@ -287,10 +312,8 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 		}
 
 		sc := sp.Status.StorageClass
-		if c.goldenImageSc == nil || (sc != nil && *sc == c.results.DefaultStorageClass) {
-			if c.hasSmartCloneAndRWX(ctx, sp, vscs) {
-				c.goldenImageSc = sc
-			}
+		if sc != nil && c.hasSmartCloneAndRWX(ctx, sp, vscs) {
+			c.goldenImageScs = append(c.goldenImageScs, *sc)
 		}
 
 		if len(sp.Status.ClaimPropertySets) == 0 {
@@ -329,7 +352,7 @@ func hasRWX(cpSets []cdiv1.ClaimPropertySet) bool {
 	return false
 }
 
-func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs *snapshotv1.VolumeSnapshotClassList, errStr *string) {
+func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs *snapshotv1.VolumeSnapshotClassList, _ *string) {
 	log.Print("checkVolumeSnapShotClasses")
 
 	spNames := ""
@@ -547,6 +570,12 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 	const randomStringLen = 5
 
 	log.Print("checkVMICreation")
+	if c.goldenImagePvc == nil {
+		log.Print(messageSkipNoPVC)
+		c.results.VMBootFromGoldenImage = messageSkipNoPVC
+		return nil
+	}
+
 	vmName := fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
 	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc)
 	log.Printf("Creating VM %q", vmName)
@@ -558,7 +587,7 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
 			for i := range vmi.Status.Conditions {
 				condition := vmi.Status.Conditions[i]
-				if condition.Type == kvcorev1.VirtualMachineInstanceAgentConnected && condition.Status == corev1.ConditionTrue {
+				if condition.Type == kvcorev1.VirtualMachineInstanceReady && condition.Status == corev1.ConditionTrue {
 					return true, nil
 				}
 			}
@@ -588,6 +617,25 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 
 func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) error {
 	log.Print("checkVMILiveMigration")
+
+	if c.vmUnderTest == nil {
+		log.Print(messageSkipNoVMI)
+		c.results.VMLiveMigration = messageSkipNoVMI
+		return nil
+	}
+
+	vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, c.vmUnderTest.Name)
+	if err != nil {
+		return err
+	}
+	for i := range vmi.Status.Conditions {
+		condition := vmi.Status.Conditions[i]
+		if condition.Type == kvcorev1.VirtualMachineInstanceIsMigratable && condition.Status == corev1.ConditionFalse {
+			log.Print(condition.Message)
+			c.results.VMLiveMigration = condition.Message
+			return nil
+		}
+	}
 
 	vmim := &kvcorev1.VirtualMachineInstanceMigration{
 		TypeMeta: metav1.TypeMeta{
@@ -626,6 +674,18 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 
 func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) error {
 	log.Print("checkVMIHotplugVolume")
+
+	if c.vmUnderTest == nil {
+		log.Print(messageSkipNoVMI)
+		c.results.VMHotplugVolume = messageSkipNoVMI
+		return nil
+	}
+
+	if c.goldenImagePvc == nil {
+		log.Print(messageSkipNoPVC)
+		c.results.VMHotplugVolume = messageSkipNoPVC
+		return nil
+	}
 
 	dv := &cdiv1.DataVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -745,6 +805,17 @@ func appendSep(s *string, appended string) {
 		return
 	}
 	*s = *s + "\n" + appended
+}
+
+// FIXME: use slices.contains instead
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
 }
 
 func ignoreNotFound(err error) error {
