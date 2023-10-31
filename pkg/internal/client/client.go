@@ -53,15 +53,15 @@ func New() (*Client, error) {
 
 func (c *Client) CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (
 	*kvcorev1.VirtualMachine, error) {
-	return c.KubevirtClient.VirtualMachine(namespace).Create(vm)
+	return c.KubevirtClient.VirtualMachine(namespace).Create(ctx, vm)
 }
 
 func (c *Client) DeleteVirtualMachine(ctx context.Context, namespace, name string) error {
-	return c.KubevirtClient.VirtualMachine(namespace).Delete(name, &metav1.DeleteOptions{})
+	return c.KubevirtClient.VirtualMachine(namespace).Delete(ctx, name, &metav1.DeleteOptions{})
 }
 
 func (c *Client) GetVirtualMachineInstance(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachineInstance, error) {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).Get(name, &metav1.GetOptions{})
+	return c.KubevirtClient.VirtualMachineInstance(namespace).Get(ctx, name, &metav1.GetOptions{})
 }
 
 func (c *Client) CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
@@ -71,12 +71,12 @@ func (c *Client) CreateVirtualMachineInstanceMigration(ctx context.Context, name
 
 func (c *Client) AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
 	addVolumeOptions *kvcorev1.AddVolumeOptions) error {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).AddVolume(name, addVolumeOptions)
+	return c.KubevirtClient.VirtualMachineInstance(namespace).AddVolume(ctx, name, addVolumeOptions)
 }
 
 func (c *Client) RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
 	removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).RemoveVolume(name, removeVolumeOptions)
+	return c.KubevirtClient.VirtualMachineInstance(namespace).RemoveVolume(ctx, name, removeVolumeOptions)
 }
 
 func (c *Client) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {
@@ -112,7 +112,7 @@ func (c *Client) ListDataImportCrons(ctx context.Context, namespace string) (*cd
 }
 
 func (c *Client) ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error) {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).List(&metav1.ListOptions{})
+	return c.KubevirtClient.VirtualMachineInstance(namespace).List(ctx, &metav1.ListOptions{})
 }
 
 func (c *Client) GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
