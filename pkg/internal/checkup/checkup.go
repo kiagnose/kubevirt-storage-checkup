@@ -157,54 +157,16 @@ func (c *Checkup) Run(ctx context.Context) error {
 	return nil
 }
 
-// FIXME: refactor
+// FIXME: allow providing specific golden image namespace in the config, instead of scanning all namespaces
 func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
-	log.Print("checkGoldenImages")
-	var fallbackPvc, fallbackPvcDefaultSC *corev1.PersistentVolumeClaim
+	var fallbackPvcDefaultSC, fallbackPvc *corev1.PersistentVolumeClaim
 
+	log.Print("checkGoldenImages")
 	dicNames := ""
 	for i := range namespaces.Items {
-		ns := namespaces.Items[i]
-		dics, err := c.client.ListDataImportCrons(ctx, ns.Name)
-		if err != nil {
+		ns := namespaces.Items[i].Name
+		if err := c.checkDataImportCrons(ctx, ns, &dicNames, &fallbackPvcDefaultSC, &fallbackPvc); err != nil {
 			return err
-		}
-		for i := range dics.Items {
-			dic := dics.Items[i]
-			if !isDataImportCronUpToDate(dic.Status.Conditions) {
-				appendSep(&dicNames, dic.Namespace+"/"+dic.Name)
-				continue
-			}
-			das, err := c.client.GetDataSource(ctx, ns.Name, dic.Spec.ManagedDataSource)
-			if err != nil {
-				return err
-			}
-			if !isDataSourceReady(das.Status.Conditions) {
-				appendSep(&dicNames, das.Namespace+"/"+das.Name)
-				continue
-			}
-
-			// Prefer golden image with default SC
-			if pvc := c.goldenImagePvc; pvc != nil {
-				if sc := pvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
-					continue
-				}
-			}
-
-			srcPvc := das.Spec.Source.PVC
-			pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
-			if err != nil {
-				return err
-			}
-
-			sc := pvc.Spec.StorageClassName
-			if sc != nil && contains(c.goldenImageScs, *sc) {
-				c.goldenImagePvc = pvc
-			} else if fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
-				fallbackPvcDefaultSC = pvc
-			} else if fallbackPvc == nil {
-				fallbackPvc = pvc
-			}
 		}
 	}
 
@@ -228,6 +190,64 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 		appendSep(errStr, errGoldenImagesNotUpToDate)
 	}
 	return nil
+}
+
+func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, dicNames *string,
+	fallbackPvcDefaultSC, fallbackPvc **corev1.PersistentVolumeClaim) error {
+	dics, err := c.client.ListDataImportCrons(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	for i := range dics.Items {
+		dic := &dics.Items[i]
+		pvc, err := c.getGoldenImagePvc(ctx, dic)
+		if err != nil {
+			return err
+		}
+		if pvc == nil {
+			appendSep(dicNames, dic.Namespace+"/"+dic.Name)
+			continue
+		}
+
+		// Prefer golden image with default SC
+		if c.goldenImagePvc != nil {
+			if sc := c.goldenImagePvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
+				continue
+			}
+		}
+
+		sc := pvc.Spec.StorageClassName
+		if sc != nil && contains(c.goldenImageScs, *sc) {
+			c.goldenImagePvc = pvc
+		} else if *fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
+			*fallbackPvcDefaultSC = pvc
+		} else if *fallbackPvc == nil {
+			*fallbackPvc = pvc
+		}
+	}
+
+	return nil
+}
+
+func (c *Checkup) getGoldenImagePvc(ctx context.Context, dic *cdiv1.DataImportCron) (*corev1.PersistentVolumeClaim, error) {
+	if !isDataImportCronUpToDate(dic.Status.Conditions) {
+		return nil, nil
+	}
+	das, err := c.client.GetDataSource(ctx, dic.Namespace, dic.Spec.ManagedDataSource)
+	if err != nil {
+		return nil, err
+	}
+	if !isDataSourceReady(das.Status.Conditions) {
+		return nil, nil
+	}
+
+	srcPvc := das.Spec.Source.PVC
+	pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	return pvc, nil
 }
 
 func isDataImportCronUpToDate(conditions []cdiv1.DataImportCronCondition) bool {
