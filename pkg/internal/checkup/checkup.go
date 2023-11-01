@@ -64,6 +64,7 @@ type kubeVirtStorageClient interface {
 	ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error)
 	GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error)
 	GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error)
+	GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error)
 	GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error)
 	GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error)
 }
@@ -81,17 +82,24 @@ const (
 	errVMsWithNonVirtRbdStorageClass = "There are VMs using the plain RBD storageclass when the virtualization storageclass exists."
 	errVMsWithUnsetEfsStorageClass   = "There are VMs using an EFS storageclass where the gid and uid are not set in the storageclass."
 	errGoldenImagesNotUpToDate       = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
-	messageSkipNoPVC                 = "Skip check - no golden image pvc"
+	messageSkipNoGoldenImage         = "Skip check - no golden image PVC or Snapshot"
 	messageSkipNoVMI                 = "Skip check - no VMI"
 )
 
 type Checkup struct {
-	client         kubeVirtStorageClient
-	namespace      string
-	goldenImageScs []string
-	goldenImagePvc *corev1.PersistentVolumeClaim
-	vmUnderTest    *kvcorev1.VirtualMachine
-	results        status.Results
+	client          kubeVirtStorageClient
+	namespace       string
+	goldenImageScs  []string
+	goldenImagePvc  *corev1.PersistentVolumeClaim
+	goldenImageSnap *snapshotv1.VolumeSnapshot
+	vmUnderTest     *kvcorev1.VirtualMachine
+	results         status.Results
+}
+
+type goldenImagesCheckState struct {
+	notReadyDicNames     string
+	fallbackPvcDefaultSC *corev1.PersistentVolumeClaim
+	fallbackPvc          *corev1.PersistentVolumeClaim
 }
 
 func New(client kubeVirtStorageClient, namespace string, checkupConfig config.Config) *Checkup {
@@ -159,95 +167,92 @@ func (c *Checkup) Run(ctx context.Context) error {
 
 // FIXME: allow providing specific golden image namespace in the config, instead of scanning all namespaces
 func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
-	var fallbackPvcDefaultSC, fallbackPvc *corev1.PersistentVolumeClaim
-
 	log.Print("checkGoldenImages")
-	dicNames := ""
+
+	var cs goldenImagesCheckState
 	for i := range namespaces.Items {
 		ns := namespaces.Items[i].Name
-		if err := c.checkDataImportCrons(ctx, ns, &dicNames, &fallbackPvcDefaultSC, &fallbackPvc); err != nil {
+		if err := c.checkDataImportCrons(ctx, ns, &cs); err != nil {
 			return err
 		}
 	}
 
 	if c.goldenImagePvc == nil {
-		if fallbackPvcDefaultSC != nil {
-			c.goldenImagePvc = fallbackPvcDefaultSC
-		} else if fallbackPvc != nil {
-			c.goldenImagePvc = fallbackPvc
+		if cs.fallbackPvcDefaultSC != nil {
+			c.goldenImagePvc = cs.fallbackPvcDefaultSC
+		} else if cs.fallbackPvc != nil {
+			c.goldenImagePvc = cs.fallbackPvc
 		}
 	}
 
 	if pvc := c.goldenImagePvc; pvc != nil {
 		log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
 			pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+	} else if snap := c.goldenImageSnap; snap != nil {
+		log.Printf("Selected golden image Snapshot: %s/%s", snap.Namespace, snap.Name)
 	} else {
-		log.Print("No golden image PVC found")
+		log.Print("No golden image PVC or Snapshot found")
 	}
 
-	if dicNames != "" {
-		c.results.GoldenImagesNotUpToDate = dicNames
+	if cs.notReadyDicNames != "" {
+		c.results.GoldenImagesNotUpToDate = cs.notReadyDicNames
 		appendSep(errStr, errGoldenImagesNotUpToDate)
 	}
 	return nil
 }
 
-func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, dicNames *string,
-	fallbackPvcDefaultSC, fallbackPvc **corev1.PersistentVolumeClaim) error {
+func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs *goldenImagesCheckState) error {
 	dics, err := c.client.ListDataImportCrons(ctx, namespace)
 	if err != nil {
 		return err
 	}
 	for i := range dics.Items {
 		dic := &dics.Items[i]
-		pvc, err := c.getGoldenImagePvc(ctx, dic)
+		pvc, snap, err := c.getGoldenImage(ctx, dic)
 		if err != nil {
 			return err
 		}
-		if pvc == nil {
-			appendSep(dicNames, dic.Namespace+"/"+dic.Name)
+		if pvc == nil && snap == nil {
+			appendSep(&cs.notReadyDicNames, dic.Namespace+"/"+dic.Name)
 			continue
 		}
 
-		// Prefer golden image with default SC
-		if c.goldenImagePvc != nil {
-			if sc := c.goldenImagePvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
-				continue
-			}
-		}
-
-		sc := pvc.Spec.StorageClassName
-		if sc != nil && contains(c.goldenImageScs, *sc) {
-			c.goldenImagePvc = pvc
-		} else if *fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
-			*fallbackPvcDefaultSC = pvc
-		} else if *fallbackPvc == nil {
-			*fallbackPvc = pvc
-		}
+		c.updategoldenImageSnapshot(snap)
+		c.updategoldenImagePvc(pvc, cs)
 	}
 
 	return nil
 }
 
-func (c *Checkup) getGoldenImagePvc(ctx context.Context, dic *cdiv1.DataImportCron) (*corev1.PersistentVolumeClaim, error) {
+func (c *Checkup) getGoldenImage(ctx context.Context, dic *cdiv1.DataImportCron) (
+	*corev1.PersistentVolumeClaim, *snapshotv1.VolumeSnapshot, error) {
 	if !isDataImportCronUpToDate(dic.Status.Conditions) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	das, err := c.client.GetDataSource(ctx, dic.Namespace, dic.Spec.ManagedDataSource)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !isDataSourceReady(das.Status.Conditions) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	srcPvc := das.Spec.Source.PVC
-	pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
-	if err != nil {
-		return nil, err
+	if srcPvc := das.Spec.Source.PVC; srcPvc != nil {
+		pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pvc, nil, nil
+	}
+	if srcSnap := das.Spec.Source.Snapshot; srcSnap != nil {
+		snap, err := c.client.GetVolumeSnapshot(ctx, srcSnap.Namespace, srcSnap.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, snap, nil
 	}
 
-	return pvc, nil
+	return nil, nil, errors.New("DataSource has no PVC or Snapshot source")
 }
 
 func isDataImportCronUpToDate(conditions []cdiv1.DataImportCronCondition) bool {
@@ -268,6 +273,34 @@ func isDataSourceReady(conditions []cdiv1.DataSourceCondition) bool {
 		}
 	}
 	return false
+}
+
+func (c *Checkup) updategoldenImagePvc(pvc *corev1.PersistentVolumeClaim, cs *goldenImagesCheckState) {
+	if pvc == nil {
+		return
+	}
+
+	// Prefer golden image with default SC
+	if c.goldenImagePvc != nil {
+		if sc := c.goldenImagePvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
+			return
+		}
+	}
+
+	sc := pvc.Spec.StorageClassName
+	if sc != nil && contains(c.goldenImageScs, *sc) {
+		c.goldenImagePvc = pvc
+	} else if cs.fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
+		cs.fallbackPvcDefaultSC = pvc
+	} else if cs.fallbackPvc == nil {
+		cs.fallbackPvc = pvc
+	}
+}
+
+func (c *Checkup) updategoldenImageSnapshot(snap *snapshotv1.VolumeSnapshot) {
+	if snap != nil && c.goldenImageSnap == nil {
+		c.goldenImageSnap = snap
+	}
 }
 
 func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errStr *string) {
@@ -590,14 +623,14 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 	const randomStringLen = 5
 
 	log.Print("checkVMICreation")
-	if c.goldenImagePvc == nil {
-		log.Print(messageSkipNoPVC)
-		c.results.VMBootFromGoldenImage = messageSkipNoPVC
+	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
+		log.Print(messageSkipNoGoldenImage)
+		c.results.VMBootFromGoldenImage = messageSkipNoGoldenImage
 		return nil
 	}
 
 	vmName := fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
-	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc)
+	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap)
 	log.Printf("Creating VM %q", vmName)
 	if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, c.vmUnderTest); err != nil {
 		return fmt.Errorf("failed to create VM: %w", err)
@@ -701,27 +734,11 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 		return nil
 	}
 
-	if c.goldenImagePvc == nil {
-		log.Print(messageSkipNoPVC)
-		c.results.VMHotplugVolume = messageSkipNoPVC
-		return nil
-	}
-
 	dv := &cdiv1.DataVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hotplugVolumeName,
 		},
-		Spec: cdiv1.DataVolumeSpec{
-			Source: &cdiv1.DataVolumeSource{
-				PVC: &cdiv1.DataVolumeSourcePVC{
-					Namespace: c.goldenImagePvc.Namespace,
-					Name:      c.goldenImagePvc.Name,
-				},
-			},
-			Storage: &cdiv1.StorageSpec{
-				StorageClassName: c.goldenImagePvc.Spec.StorageClassName,
-			},
-		},
+		Spec: c.vmUnderTest.Spec.DataVolumeTemplates[0].Spec,
 	}
 
 	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {

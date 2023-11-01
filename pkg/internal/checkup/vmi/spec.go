@@ -19,6 +19,8 @@
 package vmi
 
 import (
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -57,24 +59,31 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	return newVM
 }
 
-func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim) Option {
+func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot) Option {
 	return func(vmSpec *kvcorev1.VirtualMachineSpec) {
 		dvt := kvcorev1.DataVolumeTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: OSDataVolumName,
 			},
 			Spec: cdiv1.DataVolumeSpec{
-				Source: &cdiv1.DataVolumeSource{
-					PVC: &cdiv1.DataVolumeSourcePVC{
-						Namespace: pvc.Namespace,
-						Name:      pvc.Name,
-					},
-				},
-				Storage: &cdiv1.StorageSpec{
-					StorageClassName: pvc.Spec.StorageClassName,
-				},
+				Source:  &cdiv1.DataVolumeSource{},
+				Storage: &cdiv1.StorageSpec{},
 			},
 		}
+
+		if pvc != nil {
+			dvt.Spec.Source.PVC = &cdiv1.DataVolumeSourcePVC{
+				Namespace: pvc.Namespace,
+				Name:      pvc.Name,
+			}
+			dvt.Spec.Storage.StorageClassName = pvc.Spec.StorageClassName
+		} else if snap != nil {
+			dvt.Spec.Source.Snapshot = &cdiv1.DataVolumeSourceSnapshot{
+				Namespace: snap.Namespace,
+				Name:      snap.Name,
+			}
+		}
+
 		vmSpec.DataVolumeTemplates = append(vmSpec.DataVolumeTemplates, dvt)
 
 		newVolume := kvcorev1.Volume{
