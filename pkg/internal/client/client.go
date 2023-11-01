@@ -123,6 +123,10 @@ func (c *Client) GetPersistentVolume(ctx context.Context, name string) (*corev1.
 	return c.KubevirtClient.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
 }
 
+func (c *Client) GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error) {
+	return c.KubevirtClient.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshots(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
 func (c *Client) GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error) {
 	return c.KubevirtClient.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
 }
