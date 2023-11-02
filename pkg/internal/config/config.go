@@ -21,13 +21,35 @@ package config
 
 import (
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
+	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/client"
 )
 
 // FIXME: pass something here - maybe golden image ns?
 type Config struct {
 }
 
-func New(baseConfig kconfig.Config) (Config, error) {
+func New(c *client.Client, baseConfig kconfig.Config) (Config, error) {
 	newConfig := Config{}
-	return newConfig, nil
+	err := signConfigMap(c, baseConfig)
+	return newConfig, err
+}
+
+func signConfigMap(c *client.Client, baseConfig kconfig.Config) error {
+	cm, err := kconfigmap.Get(c, baseConfig.ConfigMapNamespace, baseConfig.ConfigMapName)
+	if err != nil {
+		return err
+	}
+	if cm.Labels == nil {
+		cm.Labels = map[string]string{}
+	}
+	cm.Labels["kiagnose/checkup-type"] = "kubevirt-vm-storage"
+	if cm.Data == nil {
+		cm.Data = map[string]string{}
+	}
+	cm.Data["status.succeeded"] = "false"
+	_, err = kconfigmap.Update(c, cm)
+
+	return err
 }

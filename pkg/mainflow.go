@@ -21,7 +21,6 @@ package pkg
 
 import (
 	"context"
-	"log"
 
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
 
@@ -43,12 +42,10 @@ func Run(rawEnv map[string]string, namespace string) error {
 		return err
 	}
 
-	cfg, err := config.New(baseConfig)
+	cfg, err := config.New(c, baseConfig)
 	if err != nil {
 		return err
 	}
-
-	printConfig(cfg)
 
 	l := launcher.New(checkup.New(c, namespace, cfg), reporter.New(c, baseConfig.ConfigMapNamespace, baseConfig.ConfigMapName))
 
@@ -56,8 +53,4 @@ func Run(rawEnv map[string]string, namespace string) error {
 	defer cancel()
 
 	return l.Run(ctx)
-}
-
-func printConfig(checkupConfig config.Config) {
-	log.Println("Using the following config:")
 }
