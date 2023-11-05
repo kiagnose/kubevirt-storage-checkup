@@ -45,10 +45,6 @@ func signConfigMap(c *client.Client, baseConfig kconfig.Config) error {
 		cm.Labels = map[string]string{}
 	}
 	cm.Labels["kiagnose/checkup-type"] = "kubevirt-vm-storage"
-	if cm.Data == nil {
-		cm.Data = map[string]string{}
-	}
-	cm.Data["status.succeeded"] = "false"
 	_, err = kconfigmap.Update(c, cm)
 
 	return err
