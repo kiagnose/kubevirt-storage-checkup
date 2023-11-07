@@ -73,7 +73,7 @@ const (
 	VMIUnderTestNamePrefix = "vmi-under-test"
 	hotplugVolumeName      = "hotplug-volume"
 
-	annDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
+	AnnDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
 
 	errNoDefaultStorageClass         = "No default storage class."
 	errMultipleDefaultStorageClasses = "There are multiple default storage classes."
@@ -84,6 +84,9 @@ const (
 	errGoldenImagesNotUpToDate       = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
 	messageSkipNoGoldenImage         = "Skip check - no golden image PVC or Snapshot"
 	messageSkipNoVMI                 = "Skip check - no VMI"
+
+	pollInterval = 5 * time.Second
+	pollDuration = 3 * time.Minute
 )
 
 type Checkup struct {
@@ -308,7 +311,7 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 
 	for i := range scs.Items {
 		sc := scs.Items[i]
-		if sc.Annotations[annDefaultStorageClass] == "true" {
+		if sc.Annotations[AnnDefaultStorageClass] == "true" {
 			if c.results.DefaultStorageClass != "" {
 				c.results.DefaultStorageClass = errMultipleDefaultStorageClasses
 				appendSep(errStr, errMultipleDefaultStorageClasses)
@@ -807,7 +810,6 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 type checkVMIStatusFn func(*kvcorev1.VirtualMachineInstance) (done bool, err error)
 
 func (c *Checkup) waitForVMIStatus(ctx context.Context, checkMsg string, result, errStr *string, checkVMIStatus checkVMIStatusFn) error {
-	const pollInterval = 5 * time.Second
 	vmName := c.vmUnderTest.Name
 
 	conditionFn := func(ctx context.Context) (bool, error) {
@@ -819,7 +821,7 @@ func (c *Checkup) waitForVMIStatus(ctx context.Context, checkMsg string, result,
 	}
 
 	log.Printf("Waiting for VMI %q %s", vmName, checkMsg)
-	if err := wait.PollImmediateUntilWithContext(ctx, pollInterval, conditionFn); err != nil {
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, pollDuration, conditionFn); err != nil {
 		res := fmt.Sprintf("failed waiting for VMI %q %s: %v", vmName, checkMsg, err)
 		log.Print(res)
 		appendSep(result, res)
