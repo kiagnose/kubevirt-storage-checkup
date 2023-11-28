@@ -43,66 +43,30 @@ func TestLauncherRunShouldSucceed(t *testing.T) {
 }
 
 func TestLauncherRunShouldFailWhen(t *testing.T) {
-	t.Run("report fails", func(t *testing.T) {
-		testLauncher := launcher.New(checkupStub{}, &reporterStub{failReport: errReport})
-		assert.ErrorContains(t, testLauncher.Run(context.Background()), errReport.Error())
-	})
+	tests := map[string]struct {
+		checkup  checkupStub
+		reporter reporterStub
+		errors   []string
+	}{
+		"report fails":                  {checkup: checkupStub{}, reporter: reporterStub{failReport: errReport}, errors: []string{errReport.Error()}},
+		"setup fails":                   {checkup: checkupStub{failSetup: errSetup}, reporter: reporterStub{}, errors: []string{errSetup.Error()}},
+		"run fails":                     {checkup: checkupStub{failRun: errRun}, reporter: reporterStub{}, errors: []string{errRun.Error()}},
+		"teardown fails":                {checkup: checkupStub{failTeardown: errTeardown}, reporter: reporterStub{}, errors: []string{errTeardown.Error()}},
+		"setup and 2nd report fail":     {checkup: checkupStub{failSetup: errSetup}, reporter: reporterStub{failReport: errReport, failOnSecondReport: true}, errors: []string{errSetup.Error(), errReport.Error()}},
+		"run and report fail":           {checkup: checkupStub{failRun: errRun}, reporter: reporterStub{failReport: errReport, failOnSecondReport: true}, errors: []string{errRun.Error(), errReport.Error()}},
+		"teardown and report fail":      {checkup: checkupStub{failTeardown: errTeardown}, reporter: reporterStub{failReport: errReport, failOnSecondReport: true}, errors: []string{errTeardown.Error(), errReport.Error()}},
+		"run, teardown and report fail": {checkup: checkupStub{failRun: errRun, failTeardown: errTeardown}, reporter: reporterStub{failReport: errReport, failOnSecondReport: true}, errors: []string{errRun.Error(), errTeardown.Error(), errReport.Error()}},
+	}
 
-	t.Run("setup fails", func(t *testing.T) {
-		testLauncher := launcher.New(checkupStub{failSetup: errSetup}, &reporterStub{})
-		assert.ErrorContains(t, testLauncher.Run(context.Background()), errSetup.Error())
-	})
-
-	t.Run("setup and 2nd report fail", func(t *testing.T) {
-		testLauncher := launcher.New(
-			checkupStub{failSetup: errSetup},
-			&reporterStub{failReport: errReport, failOnSecondReport: true},
-		)
-		err := testLauncher.Run(context.Background())
-		assert.ErrorContains(t, err, errSetup.Error())
-		assert.ErrorContains(t, err, errReport.Error())
-	})
-
-	t.Run("run fails", func(t *testing.T) {
-		testLauncher := launcher.New(checkupStub{failRun: errRun}, &reporterStub{})
-		assert.ErrorContains(t, testLauncher.Run(context.Background()), errRun.Error())
-	})
-
-	t.Run("teardown fails", func(t *testing.T) {
-		testLauncher := launcher.New(checkupStub{failTeardown: errTeardown}, &reporterStub{})
-		assert.ErrorContains(t, testLauncher.Run(context.Background()), errTeardown.Error())
-	})
-
-	t.Run("run and report fail", func(t *testing.T) {
-		testLauncher := launcher.New(
-			checkupStub{failRun: errRun},
-			&reporterStub{failReport: errReport, failOnSecondReport: true},
-		)
-		err := testLauncher.Run(context.Background())
-		assert.ErrorContains(t, err, errRun.Error())
-		assert.ErrorContains(t, err, errReport.Error())
-	})
-
-	t.Run("teardown and report fail", func(t *testing.T) {
-		testLauncher := launcher.New(
-			checkupStub{failTeardown: errTeardown},
-			&reporterStub{failReport: errReport, failOnSecondReport: true},
-		)
-		err := testLauncher.Run(context.Background())
-		assert.ErrorContains(t, err, errTeardown.Error())
-		assert.ErrorContains(t, err, errReport.Error())
-	})
-
-	t.Run("run, teardown and report fail", func(t *testing.T) {
-		testLauncher := launcher.New(
-			checkupStub{failRun: errRun, failTeardown: errTeardown},
-			&reporterStub{failReport: errReport, failOnSecondReport: true},
-		)
-		err := testLauncher.Run(context.Background())
-		assert.ErrorContains(t, err, errRun.Error())
-		assert.ErrorContains(t, err, errTeardown.Error())
-		assert.ErrorContains(t, err, errReport.Error())
-	})
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			testLauncher := launcher.New(tc.checkup, &tc.reporter)
+			err := testLauncher.Run(context.Background())
+			for _, expectedErr := range tc.errors {
+				assert.ErrorContains(t, err, expectedErr)
+			}
+		})
+	}
 }
 
 type checkupStub struct {
