@@ -58,30 +58,31 @@ func (r *Reporter) Report(checkupStatus status.Status) error {
 
 	checkupStatus.Succeeded = len(checkupStatus.FailureReason) == 0
 
-	checkupStatus.Status.Results = formatResults(checkupStatus)
+	checkupStatus.Status.Results = FormatResults(checkupStatus.Results)
 
 	return r.Reporter.Report(checkupStatus.Status)
 }
 
-func formatResults(checkupStatus status.Status) map[string]string {
+//FormatResults returns a map representing the checkup results
+func FormatResults(checkupResults status.Results) map[string]string {
 	var emptyResults status.Results
-	if checkupStatus.Results == emptyResults {
+	if checkupResults == emptyResults {
 		return map[string]string{}
 	}
 
 	formattedResults := map[string]string{
-		DefaultStorageClassKey:                       checkupStatus.Results.DefaultStorageClass,
-		StorageProfilesWithEmptyClaimPropertySetsKey: checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
-		StorageProfilesWithSpecClaimPropertySetsKey:  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
-		StorageWithRWXKey:                            checkupStatus.Results.StorageWithRWX,
-		StorageMissingVolumeSnapshotClassKey:         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
-		GoldenImagesNotUpToDateKey:                   checkupStatus.Results.GoldenImagesNotUpToDate,
-		VMsWithNonVirtRbdStorageClassKey:             checkupStatus.Results.VMsWithNonVirtRbdStorageClass,
-		VMsWithUnsetEfsStorageClassKey:               checkupStatus.Results.VMsWithUnsetEfsStorageClass,
-		VMBootFromGoldenImageKey:                     checkupStatus.Results.VMBootFromGoldenImage,
-		VMVolumeCloneKey:                             checkupStatus.Results.VMVolumeClone,
-		VMLiveMigrationKey:                           checkupStatus.Results.VMLiveMigration,
-		VMHotplugVolumeKey:                           checkupStatus.Results.VMHotplugVolume,
+		DefaultStorageClassKey:                       checkupResults.DefaultStorageClass,
+		StorageProfilesWithEmptyClaimPropertySetsKey: checkupResults.StorageProfilesWithEmptyClaimPropertySets,
+		StorageProfilesWithSpecClaimPropertySetsKey:  checkupResults.StorageProfilesWithSpecClaimPropertySets,
+		StorageWithRWXKey:                            checkupResults.StorageWithRWX,
+		StorageMissingVolumeSnapshotClassKey:         checkupResults.StorageMissingVolumeSnapshotClass,
+		GoldenImagesNotUpToDateKey:                   checkupResults.GoldenImagesNotUpToDate,
+		VMsWithNonVirtRbdStorageClassKey:             checkupResults.VMsWithNonVirtRbdStorageClass,
+		VMsWithUnsetEfsStorageClassKey:               checkupResults.VMsWithUnsetEfsStorageClass,
+		VMBootFromGoldenImageKey:                     checkupResults.VMBootFromGoldenImage,
+		VMVolumeCloneKey:                             checkupResults.VMVolumeClone,
+		VMLiveMigrationKey:                           checkupResults.VMLiveMigration,
+		VMHotplugVolumeKey:                           checkupResults.VMHotplugVolume,
 	}
 
 	return formattedResults
