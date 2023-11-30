@@ -89,6 +89,15 @@ const (
 	pollDuration = 3 * time.Minute
 )
 
+// UnsupportedProvisioners is a hash of provisioners which are known not to work with CDI
+var UnsupportedProvisioners = map[string]struct{}{
+	"kubernetes.io/no-provisioner": {},
+	// The following provisioners may be found in Rook/Ceph deployments and are related to object storage
+	"openshift-storage.ceph.rook.io/bucket": {},
+
+	"openshift-storage.noobaa.io/obc": {},
+}
+
 type Checkup struct {
 	client          kubeVirtStorageClient
 	namespace       string
@@ -360,10 +369,7 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 	for i := range sps.Items {
 		sp := &sps.Items[i]
 		provisioner := sp.Status.Provisioner
-		if provisioner == nil ||
-			*provisioner == "kubernetes.io/no-provisioner" ||
-			*provisioner == "openshift-storage.ceph.rook.io/bucket" ||
-			*provisioner == "openshift-storage.noobaa.io/obc" {
+		if provisioner == nil || unsupportedProvisioner(*provisioner) {
 			continue
 		}
 
@@ -417,7 +423,8 @@ func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs
 		strategy := sp.Status.CloneStrategy
 		provisioner := sp.Status.Provisioner
 		if (strategy == nil || *strategy == cdiv1.CloneStrategySnapshot) &&
-			provisioner != nil && !hasDriver(vscs, *provisioner) {
+			provisioner != nil && !unsupportedProvisioner(*provisioner) &&
+			!hasDriver(vscs, *provisioner) {
 			appendSep(&spNames, sp.Name)
 		}
 	}
@@ -426,6 +433,11 @@ func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs
 		// FIXME: not sure the checkup should fail on this one
 		// appendSep(errStr, errMissingVolumeSnapshotClass)
 	}
+}
+
+func unsupportedProvisioner(provisioner string) bool {
+	_, ok := UnsupportedProvisioners[provisioner]
+	return ok
 }
 
 func hasDriver(vscs *snapshotv1.VolumeSnapshotClassList, driver string) bool {
