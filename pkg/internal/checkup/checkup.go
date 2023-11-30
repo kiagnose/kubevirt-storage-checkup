@@ -110,6 +110,7 @@ type Checkup struct {
 
 type goldenImagesCheckState struct {
 	notReadyDicNames     string
+	noDataSourceDicNames string
 	fallbackPvcDefaultSC *corev1.PersistentVolumeClaim
 	fallbackPvc          *corev1.PersistentVolumeClaim
 }
@@ -210,6 +211,10 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 		c.results.GoldenImagesNotUpToDate = cs.notReadyDicNames
 		appendSep(errStr, errGoldenImagesNotUpToDate)
 	}
+	if cs.noDataSourceDicNames != "" {
+		c.results.GoldenImagesNoDataSource = cs.noDataSourceDicNames
+		appendSep(errStr, ErrGoldenImageNoDataSource)
+	}
 	return nil
 }
 
@@ -222,11 +227,14 @@ func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs
 		dic := &dics.Items[i]
 		pvc, snap, err := c.getGoldenImage(ctx, dic)
 		if err != nil {
+			if err.Error() == ErrGoldenImageNoDataSource {
+				appendSep(&cs.noDataSourceDicNames, dic.Namespace+"/"+dic.Name)
+				continue
+			} else if err.Error() == ErrGoldenImagesNotUpToDate {
+				appendSep(&cs.notReadyDicNames, dic.Namespace+"/"+dic.Name)
+				continue
+			}
 			return err
-		}
-		if pvc == nil && snap == nil {
-			appendSep(&cs.notReadyDicNames, dic.Namespace+"/"+dic.Name)
-			continue
 		}
 
 		c.updategoldenImageSnapshot(snap)
@@ -239,14 +247,14 @@ func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs
 func (c *Checkup) getGoldenImage(ctx context.Context, dic *cdiv1.DataImportCron) (
 	*corev1.PersistentVolumeClaim, *snapshotv1.VolumeSnapshot, error) {
 	if !isDataImportCronUpToDate(dic.Status.Conditions) {
-		return nil, nil, nil
+		return nil, nil, errors.New(ErrGoldenImagesNotUpToDate)
 	}
 	das, err := c.client.GetDataSource(ctx, dic.Namespace, dic.Spec.ManagedDataSource)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !isDataSourceReady(das.Status.Conditions) {
-		return nil, nil, nil
+		return nil, nil, errors.New(ErrGoldenImagesNotUpToDate)
 	}
 
 	if srcPvc := das.Spec.Source.PVC; srcPvc != nil {

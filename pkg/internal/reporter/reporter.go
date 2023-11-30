@@ -34,6 +34,7 @@ const (
 	StorageWithRWXKey                            = "storageWithRWX"
 	StorageMissingVolumeSnapshotClassKey         = "storageMissingVolumeSnapshotClass"
 	GoldenImagesNotUpToDateKey                   = "goldenImagesNotUpToDate"
+	GoldenImagesNoDataSourceKey                  = "goldenImagesNoDataSource"
 	VMsWithNonVirtRbdStorageClassKey             = "vmsWithNonVirtRbdStorageClass"
 	VMsWithUnsetEfsStorageClassKey               = "vmsWithUnsetEfsStorageClass"
 	VMBootFromGoldenImageKey                     = "vmBootFromGoldenImage"
@@ -77,6 +78,7 @@ func FormatResults(checkupResults status.Results) map[string]string {
 		StorageWithRWXKey:                            checkupResults.StorageWithRWX,
 		StorageMissingVolumeSnapshotClassKey:         checkupResults.StorageMissingVolumeSnapshotClass,
 		GoldenImagesNotUpToDateKey:                   checkupResults.GoldenImagesNotUpToDate,
+		GoldenImagesNoDataSourceKey:                  checkupResults.GoldenImagesNoDataSource,
 		VMsWithNonVirtRbdStorageClassKey:             checkupResults.VMsWithNonVirtRbdStorageClass,
 		VMsWithUnsetEfsStorageClassKey:               checkupResults.VMsWithUnsetEfsStorageClass,
 		VMBootFromGoldenImageKey:                     checkupResults.VMBootFromGoldenImage,
