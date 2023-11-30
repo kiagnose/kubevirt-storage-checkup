@@ -39,7 +39,7 @@ import (
 
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
-	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/reporter"
 )
 
 const (
@@ -47,11 +47,15 @@ const (
 )
 
 var (
-	testScName = "test-sc"
+	testVMIName = "test-vmi"
+	testScName  = "test-sc"
+	testScName2 = "test-sc2"
+	efsSc       = "efs.csi.aws.com"
+	testDIC     = "test-dic"
 )
 
 func TestCheckupShouldSucceed(t *testing.T) {
-	testClient := newClientStub()
+	testClient := newClientStub(clientConfig{})
 	testConfig := newTestConfig()
 
 	testCheckup := checkup.New(testClient, testNamespace, testConfig)
@@ -68,27 +72,152 @@ func TestCheckupShouldSucceed(t *testing.T) {
 	assert.Empty(t, testClient.createdVMIs)
 
 	expectedResults := successfulRunResults(vmiUnderTestName)
-	actualResults := testCheckup.Results()
+	actualResults := reporter.FormatResults(testCheckup.Results())
 	assert.Equal(t, expectedResults, actualResults)
 }
 
+func TestCheckupShouldReturnErrorWhen(t *testing.T) {
+	tests := map[string]struct {
+		clientConfig    clientConfig
+		expectedResults map[string]string
+		expectedErr     string
+	}{
+		"noStorageClasses": {
+			clientConfig:    clientConfig{noStorageClasses: true},
+			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
+			expectedErr:     checkup.ErrNoDefaultStorageClass,
+		},
+		"noDefaultStorageClass": {
+			clientConfig:    clientConfig{noDefaultStorageClass: true},
+			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
+			expectedErr:     checkup.ErrNoDefaultStorageClass,
+		},
+		"multipleDefaultStorageClasses": {
+			clientConfig:    clientConfig{multipleDefaultStorageClasses: true},
+			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
+			expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
+		},
+		"storageProfileIncomplete": {
+			clientConfig:    clientConfig{spIncomplete: true},
+			expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName, reporter.StorageProfilesWithSpecClaimPropertySetsKey: testScName, reporter.StorageWithRWXKey: ""},
+			expectedErr:     checkup.ErrEmptyClaimPropertySets,
+		},
+		"noVolumeSnapshotClasses": {
+			clientConfig:    clientConfig{noVolumeSnapshotClasses: true},
+			expectedResults: map[string]string{reporter.StorageMissingVolumeSnapshotClassKey: testScName},
+			expectedErr:     "",
+		},
+		"dataSourceNotReady": {
+			clientConfig:    clientConfig{dataSourceNotReady: true, expectNoVMI: true},
+			expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC, reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+			expectedErr:     checkup.ErrGoldenImagesNotUpToDate,
+		},
+		"dicNoDataSource": {
+			clientConfig:    clientConfig{dicNoDataSource: true, expectNoVMI: true},
+			expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC, reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+			expectedErr:     checkup.ErrGoldenImageNoDataSource,
+		},
+		"vmisWithUnsetEfsSC": {
+			clientConfig:    clientConfig{unsetEfsStorageClass: true},
+			expectedResults: map[string]string{reporter.VMsWithUnsetEfsStorageClassKey: testNamespace + "/" + testVMIName},
+			expectedErr:     checkup.ErrVMsWithUnsetEfsStorageClass,
+		},
+		"dvCloneFallback": {
+			clientConfig:    clientConfig{cloneFallback: true},
+			expectedResults: map[string]string{reporter.VMVolumeCloneKey: "DV cloneType: \"host-assisted\"\nDV clone fallback reason: reason"},
+			expectedErr:     "DV clone fallback reason: reason",
+		},
+		"migrationFails": {
+			clientConfig:    clientConfig{failMigration: true},
+			expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: migration failed"},
+			expectedErr:     "migration failed",
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			testClient := newClientStub(tc.clientConfig)
+			testConfig := newTestConfig()
+
+			testCheckup := checkup.New(testClient, testNamespace, testConfig)
+
+			assert.NoError(t, testCheckup.Setup(context.Background()))
+			err := testCheckup.Run(context.Background())
+
+			vmiUnderTestName := testClient.VMIName(checkup.VMIUnderTestNamePrefix)
+			if testClient.expectNoVMI {
+				assert.Empty(t, vmiUnderTestName)
+			} else {
+				assert.NotEmpty(t, vmiUnderTestName)
+			}
+
+			expectedResults := fullExpectedResults(vmiUnderTestName, tc.expectedResults)
+			actualResults := reporter.FormatResults(testCheckup.Results())
+
+			assert.Equal(t, expectedResults, actualResults)
+			if tc.expectedErr != "" {
+				assert.ErrorContains(t, err, tc.expectedErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func fullExpectedResults(vmiUnderTestName string, expectedResults map[string]string) map[string]string {
+	fullResults := successfulRunResults(vmiUnderTestName)
+	if vmiUnderTestName == "" {
+		expectedResultsNoVMI(fullResults)
+	}
+	for key, expectedResult := range expectedResults {
+		if strings.Contains(expectedResult, "%s") {
+			expectedResult = fmt.Sprintf(expectedResult, vmiUnderTestName)
+		}
+		fullResults[key] = expectedResult
+	}
+	return fullResults
+}
+
+func expectedResultsNoVMI(expectedResults map[string]string) {
+	expectedResults[reporter.VMHotplugVolumeKey] = checkup.MessageSkipNoVMI
+	expectedResults[reporter.VMLiveMigrationKey] = checkup.MessageSkipNoVMI
+	expectedResults[reporter.VMVolumeCloneKey] = ""
+
+}
+
 // FIXME: fill relevant results
-func successfulRunResults(vmiUnderTestName string) status.Results {
-	return status.Results{
-		DefaultStorageClass:                       testScName,
-		StorageProfilesWithEmptyClaimPropertySets: "",
-		StorageProfilesWithSpecClaimPropertySets:  "",
-		StorageWithRWX:                            "",
-		StorageMissingVolumeSnapshotClass:         "",
-		GoldenImagesNotUpToDate:                   "",
-		VMsWithNonVirtRbdStorageClass:             "",
-		VMsWithUnsetEfsStorageClass:               "",
-		VMBootFromGoldenImage:                     fmt.Sprintf("VMI %q successfully booted", vmiUnderTestName),
-		VMVolumeClone:                             "DV cloneType: \"\"",
-		VMLiveMigration:                           fmt.Sprintf("VMI %q migration completed", vmiUnderTestName),
-		VMHotplugVolume: fmt.Sprintf("VMI %q hotplug volume ready\nVMI %q hotplug volume removed",
+func successfulRunResults(vmiUnderTestName string) map[string]string {
+	return map[string]string{
+		reporter.DefaultStorageClassKey:                       testScName,
+		reporter.StorageProfilesWithEmptyClaimPropertySetsKey: "",
+		reporter.StorageProfilesWithSpecClaimPropertySetsKey:  "",
+		reporter.StorageWithRWXKey:                            testScName,
+		reporter.StorageMissingVolumeSnapshotClassKey:         "",
+		reporter.GoldenImagesNotUpToDateKey:                   "",
+		reporter.GoldenImagesNoDataSourceKey:                  "",
+		reporter.VMsWithNonVirtRbdStorageClassKey:             "",
+		reporter.VMsWithUnsetEfsStorageClassKey:               "",
+		reporter.VMBootFromGoldenImageKey:                     fmt.Sprintf("VMI %q successfully booted", vmiUnderTestName),
+		reporter.VMVolumeCloneKey:                             "DV cloneType: \"\"",
+		reporter.VMLiveMigrationKey:                           fmt.Sprintf("VMI %q migration completed", vmiUnderTestName),
+		reporter.VMHotplugVolumeKey: fmt.Sprintf("VMI %q hotplug volume ready\nVMI %q hotplug volume removed",
 			vmiUnderTestName, vmiUnderTestName),
 	}
+}
+
+type clientConfig struct {
+	skipDeletion                  bool
+	noStorageClasses              bool
+	noDefaultStorageClass         bool
+	multipleDefaultStorageClasses bool
+	unsetEfsStorageClass          bool
+	spIncomplete                  bool
+	noVolumeSnapshotClasses       bool
+	dicNoDataSource               bool
+	dataSourceNotReady            bool
+	expectNoVMI                   bool
+	cloneFallback                 bool
+	failMigration                 bool
 }
 
 type clientStub struct {
@@ -97,13 +226,14 @@ type clientStub struct {
 	vmCreationFailure error
 	vmDeletionFailure error
 	vmiGetFailure     error
-	skipDeletion      bool
+	clientConfig
 }
 
-func newClientStub() *clientStub {
+func newClientStub(clientConfig clientConfig) *clientStub {
 	return &clientStub{
-		createdVMs:  map[string]*kvcorev1.VirtualMachine{},
-		createdVMIs: map[string]*kvcorev1.VirtualMachineInstance{},
+		createdVMs:   map[string]*kvcorev1.VirtualMachine{},
+		createdVMIs:  map[string]*kvcorev1.VirtualMachineInstance{},
+		clientConfig: clientConfig,
 	}
 }
 func (cs *clientStub) CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (
@@ -175,7 +305,6 @@ func (cs *clientStub) GetVirtualMachineInstance(ctx context.Context, namespace, 
 	return vmi, nil
 }
 
-// FIXME: if migrationFailure...
 func (cs *clientStub) CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
 	vmim *kvcorev1.VirtualMachineInstanceMigration) (*kvcorev1.VirtualMachineInstanceMigration, error) {
 	name := vmim.Spec.VMIName
@@ -186,6 +315,12 @@ func (cs *clientStub) CreateVirtualMachineInstanceMigration(ctx context.Context,
 	}
 	vmi.Status.MigrationState = &kvcorev1.VirtualMachineInstanceMigrationState{
 		Completed: true,
+	}
+	if cs.failMigration {
+		vmi.Status.MigrationState = &kvcorev1.VirtualMachineInstanceMigrationState{
+			Completed: false,
+			Failed:    true,
+		}
 	}
 
 	return vmim, nil
@@ -243,7 +378,7 @@ func (cs *clientStub) ListNamespaces(ctx context.Context) (*corev1.NamespaceList
 		Items: []corev1.Namespace{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-ns",
+					Name: testNamespace,
 				},
 			},
 		},
@@ -251,8 +386,10 @@ func (cs *clientStub) ListNamespaces(ctx context.Context) (*corev1.NamespaceList
 	return nsList, nil
 }
 
-// FIXME: if noDefaultStorageClassFailure...
 func (cs *clientStub) ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error) {
+	if cs.noStorageClasses {
+		return &storagev1.StorageClassList{}, nil
+	}
 	scList := &storagev1.StorageClassList{
 		Items: []storagev1.StorageClass{
 			{
@@ -261,7 +398,29 @@ func (cs *clientStub) ListStorageClasses(ctx context.Context) (*storagev1.Storag
 					Annotations: map[string]string{checkup.AnnDefaultStorageClass: "true"},
 				},
 			},
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        testScName2,
+					Annotations: map[string]string{checkup.AnnDefaultStorageClass: "false"},
+				},
+			},
 		},
+	}
+	if cs.noDefaultStorageClass {
+		scList.Items[0].Annotations[checkup.AnnDefaultStorageClass] = "false"
+	}
+	if cs.multipleDefaultStorageClasses {
+		scList.Items[1].Annotations[checkup.AnnDefaultStorageClass] = "true"
+	}
+	if cs.unsetEfsStorageClass {
+		scList.Items = append(scList.Items, storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        "test-sc-unset-efs",
+				Annotations: map[string]string{checkup.AnnDefaultStorageClass: "false"},
+			},
+			Provisioner: efsSc,
+			Parameters:  map[string]string{"uid": ""},
+		})
 	}
 	return scList, nil
 }
@@ -273,14 +432,35 @@ func (cs *clientStub) ListStorageProfiles(ctx context.Context) (*cdiv1.StoragePr
 				ObjectMeta: metav1.ObjectMeta{
 					Name: testScName,
 				},
+				Status: cdiv1.StorageProfileStatus{
+					Provisioner:       &testScName,
+					ClaimPropertySets: []cdiv1.ClaimPropertySet{{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}}},
+				},
 			},
 		},
+	}
+	if cs.spIncomplete {
+		spList.Items[0].Status.ClaimPropertySets = []cdiv1.ClaimPropertySet{}
+		spList.Items[0].Spec.ClaimPropertySets = []cdiv1.ClaimPropertySet{{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}}}
 	}
 	return spList, nil
 }
 
 func (cs *clientStub) ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv1.VolumeSnapshotClassList, error) {
-	return nil, nil
+	if cs.noVolumeSnapshotClasses {
+		return &snapshotv1.VolumeSnapshotClassList{}, nil
+	}
+	vscList := &snapshotv1.VolumeSnapshotClassList{
+		Items: []snapshotv1.VolumeSnapshotClass{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: testScName,
+				},
+				Driver: testScName,
+			},
+		},
+	}
+	return vscList, nil
 }
 
 func (cs *clientStub) ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error) {
@@ -288,8 +468,8 @@ func (cs *clientStub) ListDataImportCrons(ctx context.Context, namespace string)
 		Items: []cdiv1.DataImportCron{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-dic",
-					Namespace: "test-ns",
+					Name:      testDIC,
+					Namespace: testNamespace,
 				},
 				Status: cdiv1.DataImportCronStatus{
 					Conditions: []cdiv1.DataImportCronCondition{
@@ -308,7 +488,43 @@ func (cs *clientStub) ListDataImportCrons(ctx context.Context, namespace string)
 }
 
 func (cs *clientStub) ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error) {
-	return nil, nil
+	vmiList := &kvcorev1.VirtualMachineInstanceList{
+		Items: []kvcorev1.VirtualMachineInstance{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      testVMIName,
+					Namespace: testNamespace,
+				},
+				Spec: kvcorev1.VirtualMachineInstanceSpec{
+					Volumes: []kvcorev1.Volume{
+						{
+							Name: "test-vol",
+							VolumeSource: kvcorev1.VolumeSource{
+								PersistentVolumeClaim: &kvcorev1.PersistentVolumeClaimVolumeSource{PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "test-pvc",
+								}},
+							},
+						},
+					},
+				},
+				Status: kvcorev1.VirtualMachineInstanceStatus{
+					Phase: kvcorev1.Running,
+					Conditions: []kvcorev1.VirtualMachineInstanceCondition{
+						{
+							Type:   kvcorev1.VirtualMachineInstanceReady,
+							Status: corev1.ConditionTrue,
+						},
+						{
+							Type:   kvcorev1.VirtualMachineInstanceIsMigratable,
+							Status: corev1.ConditionTrue,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	return vmiList, nil
 }
 
 func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
@@ -316,7 +532,7 @@ func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, n
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pvc",
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			VolumeMode:       &blockMode,
@@ -327,11 +543,34 @@ func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, n
 		},
 	}
 
+	if cs.cloneFallback {
+		pvc.Annotations = map[string]string{
+			"cdi.kubevirt.io/cloneType":           "host-assisted",
+			"cdi.kubevirt.io/cloneFallbackReason": "reason",
+		}
+	}
+
 	return pvc, nil
 }
 
 func (cs *clientStub) GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error) {
-	return nil, nil
+	pv := &corev1.PersistentVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pv",
+			Namespace: testNamespace,
+		},
+		Spec: corev1.PersistentVolumeSpec{},
+	}
+	if cs.unsetEfsStorageClass {
+		pv.Spec.PersistentVolumeSource = corev1.PersistentVolumeSource{
+			CSI: &corev1.CSIPersistentVolumeSource{
+				Driver: efsSc,
+			},
+		}
+		pv.Spec.StorageClassName = "test-sc-unset-efs"
+	}
+
+	return pv, nil
 }
 
 func (cs *clientStub) GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error) {
@@ -346,13 +585,13 @@ func (cs *clientStub) GetDataSource(ctx context.Context, namespace, name string)
 	das := &cdiv1.DataSource{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-das",
-			Namespace: "test-ns",
+			Namespace: testNamespace,
 		},
 		Spec: cdiv1.DataSourceSpec{
 			Source: cdiv1.DataSourceSource{
 				PVC: &cdiv1.DataVolumeSourcePVC{
 					Name:      "test-pvc",
-					Namespace: "test-ns",
+					Namespace: testNamespace,
 				},
 			},
 		},
@@ -366,6 +605,12 @@ func (cs *clientStub) GetDataSource(ctx context.Context, namespace, name string)
 				},
 			},
 		},
+	}
+	if cs.dicNoDataSource {
+		das.Spec.Source = cdiv1.DataSourceSource{}
+	}
+	if cs.dataSourceNotReady {
+		das.Status.Conditions[0].Status = corev1.ConditionFalse
 	}
 	return das, nil
 }
