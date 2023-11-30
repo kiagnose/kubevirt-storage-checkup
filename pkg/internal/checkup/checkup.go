@@ -75,15 +75,17 @@ const (
 
 	AnnDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
 
-	errNoDefaultStorageClass         = "No default storage class."
-	errMultipleDefaultStorageClasses = "There are multiple default storage classes."
-	errEmptyClaimPropertySets        = "There are StorageProfiles with empty ClaimPropertySets (unknown provisioners)."
-	errMissingVolumeSnapshotClass    = "There are StorageProfiles missing VolumeSnapshotClass."
-	errVMsWithNonVirtRbdStorageClass = "There are VMs using the plain RBD storageclass when the virtualization storageclass exists."
-	errVMsWithUnsetEfsStorageClass   = "There are VMs using an EFS storageclass where the gid and uid are not set in the storageclass."
-	errGoldenImagesNotUpToDate       = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
-	messageSkipNoGoldenImage         = "Skip check - no golden image PVC or Snapshot"
-	messageSkipNoVMI                 = "Skip check - no VMI"
+	ErrNoDefaultStorageClass         = "No default storage class."
+	ErrMultipleDefaultStorageClasses = "There are multiple default storage classes."
+	ErrEmptyClaimPropertySets        = "There are StorageProfiles with empty ClaimPropertySets (unknown provisioners)."
+	// FIXME: need to decide of we want to return errors in this cases
+	// errMissingVolumeSnapshotClass    = "There are StorageProfiles missing VolumeSnapshotClass."
+	// errVMsWithNonVirtRbdStorageClass = "There are VMs using the plain RBD storageclass when the virtualization storageclass exists."
+	ErrVMsWithUnsetEfsStorageClass = "There are VMs using an EFS storageclass where the gid and uid are not set in the storageclass."
+	ErrGoldenImagesNotUpToDate     = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
+	ErrGoldenImageNoDataSource     = "DataSource has no PVC or Snapshot source"
+	MessageSkipNoGoldenImage       = "Skip check - no golden image PVC or Snapshot"
+	MessageSkipNoVMI               = "Skip check - no VMI"
 
 	pollInterval = 5 * time.Second
 	pollDuration = 3 * time.Minute
@@ -209,7 +211,7 @@ func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.Name
 
 	if cs.notReadyDicNames != "" {
 		c.results.GoldenImagesNotUpToDate = cs.notReadyDicNames
-		appendSep(errStr, errGoldenImagesNotUpToDate)
+		appendSep(errStr, ErrGoldenImagesNotUpToDate)
 	}
 	if cs.noDataSourceDicNames != "" {
 		c.results.GoldenImagesNoDataSource = cs.noDataSourceDicNames
@@ -272,7 +274,7 @@ func (c *Checkup) getGoldenImage(ctx context.Context, dic *cdiv1.DataImportCron)
 		return nil, snap, nil
 	}
 
-	return nil, nil, errors.New("DataSource has no PVC or Snapshot source")
+	return nil, nil, errors.New(ErrGoldenImageNoDataSource)
 }
 
 func isDataImportCronUpToDate(conditions []cdiv1.DataImportCronCondition) bool {
@@ -330,16 +332,16 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 		sc := scs.Items[i]
 		if sc.Annotations[AnnDefaultStorageClass] == "true" {
 			if c.results.DefaultStorageClass != "" {
-				c.results.DefaultStorageClass = errMultipleDefaultStorageClasses
-				appendSep(errStr, errMultipleDefaultStorageClasses)
+				c.results.DefaultStorageClass = ErrMultipleDefaultStorageClasses
+				appendSep(errStr, ErrMultipleDefaultStorageClasses)
 				break
 			}
 			c.results.DefaultStorageClass = sc.Name
 		}
 	}
 	if c.results.DefaultStorageClass == "" {
-		c.results.DefaultStorageClass = errNoDefaultStorageClass
-		appendSep(errStr, errNoDefaultStorageClass)
+		c.results.DefaultStorageClass = ErrNoDefaultStorageClass
+		appendSep(errStr, ErrNoDefaultStorageClass)
 	}
 }
 
@@ -399,7 +401,7 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 
 	if spWithEmptyClaimPropertySets != "" {
 		c.results.StorageProfilesWithEmptyClaimPropertySets = spWithEmptyClaimPropertySets
-		appendSep(errStr, errEmptyClaimPropertySets)
+		appendSep(errStr, ErrEmptyClaimPropertySets)
 	}
 	if spWithSpecClaimPropertySets != "" {
 		c.results.StorageProfilesWithSpecClaimPropertySets = spWithSpecClaimPropertySets
@@ -506,7 +508,7 @@ func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceLis
 	}
 	if vmisWithUnsetEfsSC != "" {
 		c.results.VMsWithUnsetEfsStorageClass = vmisWithUnsetEfsSC
-		appendSep(errStr, errVMsWithUnsetEfsStorageClass)
+		appendSep(errStr, ErrVMsWithUnsetEfsStorageClass)
 	}
 
 	return nil
@@ -647,8 +649,8 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 
 	log.Print("checkVMICreation")
 	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
-		log.Print(messageSkipNoGoldenImage)
-		c.results.VMBootFromGoldenImage = messageSkipNoGoldenImage
+		log.Print(MessageSkipNoGoldenImage)
+		c.results.VMBootFromGoldenImage = MessageSkipNoGoldenImage
 		return nil
 	}
 
@@ -695,8 +697,8 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 	log.Print("checkVMILiveMigration")
 
 	if c.vmUnderTest == nil {
-		log.Print(messageSkipNoVMI)
-		c.results.VMLiveMigration = messageSkipNoVMI
+		log.Print(MessageSkipNoVMI)
+		c.results.VMLiveMigration = MessageSkipNoVMI
 		return nil
 	}
 
@@ -752,8 +754,8 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 	log.Print("checkVMIHotplugVolume")
 
 	if c.vmUnderTest == nil {
-		log.Print(messageSkipNoVMI)
-		c.results.VMHotplugVolume = messageSkipNoVMI
+		log.Print(MessageSkipNoVMI)
+		c.results.VMHotplugVolume = MessageSkipNoVMI
 		return nil
 	}
 
