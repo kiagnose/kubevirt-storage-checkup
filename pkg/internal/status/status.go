@@ -30,6 +30,7 @@ type Results struct {
 	StorageWithRWX                            string
 	StorageMissingVolumeSnapshotClass         string
 	GoldenImagesNotUpToDate                   string
+	GoldenImagesNoDataSource                  string
 	VMsWithNonVirtRbdStorageClass             string
 	VMsWithUnsetEfsStorageClass               string
 	VMBootFromGoldenImage                     string
