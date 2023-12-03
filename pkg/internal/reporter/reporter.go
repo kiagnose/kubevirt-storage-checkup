@@ -64,7 +64,7 @@ func (r *Reporter) Report(checkupStatus status.Status) error {
 	return r.Reporter.Report(checkupStatus.Status)
 }
 
-//FormatResults returns a map representing the checkup results
+// FormatResults returns a map representing the checkup results
 func FormatResults(checkupResults status.Results) map[string]string {
 	var emptyResults status.Results
 	if checkupResults == emptyResults {

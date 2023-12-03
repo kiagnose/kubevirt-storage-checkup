@@ -98,9 +98,10 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
 		},
 		"storageProfileIncomplete": {
-			clientConfig:    clientConfig{spIncomplete: true},
-			expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName, reporter.StorageProfilesWithSpecClaimPropertySetsKey: testScName, reporter.StorageWithRWXKey: ""},
-			expectedErr:     checkup.ErrEmptyClaimPropertySets,
+			clientConfig: clientConfig{spIncomplete: true},
+			expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName,
+				reporter.StorageProfilesWithSpecClaimPropertySetsKey: testScName, reporter.StorageWithRWXKey: ""},
+			expectedErr: checkup.ErrEmptyClaimPropertySets,
 		},
 		"noVolumeSnapshotClasses": {
 			clientConfig:    clientConfig{noVolumeSnapshotClasses: true},
@@ -108,14 +109,16 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			expectedErr:     "",
 		},
 		"dataSourceNotReady": {
-			clientConfig:    clientConfig{dataSourceNotReady: true, expectNoVMI: true},
-			expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC, reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
-			expectedErr:     checkup.ErrGoldenImagesNotUpToDate,
+			clientConfig: clientConfig{dataSourceNotReady: true, expectNoVMI: true},
+			expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC,
+				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+			expectedErr: checkup.ErrGoldenImagesNotUpToDate,
 		},
 		"dicNoDataSource": {
-			clientConfig:    clientConfig{dicNoDataSource: true, expectNoVMI: true},
-			expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC, reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
-			expectedErr:     checkup.ErrGoldenImageNoDataSource,
+			clientConfig: clientConfig{dicNoDataSource: true, expectNoVMI: true},
+			expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC,
+				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+			expectedErr: checkup.ErrGoldenImageNoDataSource,
 		},
 		"vmisWithUnsetEfsSC": {
 			clientConfig:    clientConfig{unsetEfsStorageClass: true},
@@ -182,7 +185,6 @@ func expectedResultsNoVMI(expectedResults map[string]string) {
 	expectedResults[reporter.VMHotplugVolumeKey] = checkup.MessageSkipNoVMI
 	expectedResults[reporter.VMLiveMigrationKey] = checkup.MessageSkipNoVMI
 	expectedResults[reporter.VMVolumeCloneKey] = ""
-
 }
 
 // FIXME: fill relevant results
@@ -441,7 +443,9 @@ func (cs *clientStub) ListStorageProfiles(ctx context.Context) (*cdiv1.StoragePr
 	}
 	if cs.spIncomplete {
 		spList.Items[0].Status.ClaimPropertySets = []cdiv1.ClaimPropertySet{}
-		spList.Items[0].Spec.ClaimPropertySets = []cdiv1.ClaimPropertySet{{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}}}
+		spList.Items[0].Spec.ClaimPropertySets = []cdiv1.ClaimPropertySet{
+			{AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany}},
+		}
 	}
 	return spList, nil
 }
@@ -500,9 +504,11 @@ func (cs *clientStub) ListVirtualMachinesInstances(ctx context.Context, namespac
 						{
 							Name: "test-vol",
 							VolumeSource: kvcorev1.VolumeSource{
-								PersistentVolumeClaim: &kvcorev1.PersistentVolumeClaimVolumeSource{PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: "test-pvc",
-								}},
+								PersistentVolumeClaim: &kvcorev1.PersistentVolumeClaimVolumeSource{
+									PersistentVolumeClaimVolumeSource: corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "test-pvc",
+									},
+								},
 							},
 						},
 					},

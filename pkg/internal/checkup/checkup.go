@@ -75,15 +75,15 @@ const (
 
 	AnnDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
 
-	ErrNoDefaultStorageClass         = "No default storage class."
-	ErrMultipleDefaultStorageClasses = "There are multiple default storage classes."
-	ErrEmptyClaimPropertySets        = "There are StorageProfiles with empty ClaimPropertySets (unknown provisioners)."
+	ErrNoDefaultStorageClass         = "no default storage class"
+	ErrMultipleDefaultStorageClasses = "there are multiple default storage classes"
+	ErrEmptyClaimPropertySets        = "there are StorageProfiles with empty ClaimPropertySets (unknown provisioners)"
 	// FIXME: need to decide of we want to return errors in this cases
-	// errMissingVolumeSnapshotClass    = "There are StorageProfiles missing VolumeSnapshotClass."
-	// errVMsWithNonVirtRbdStorageClass = "There are VMs using the plain RBD storageclass when the virtualization storageclass exists."
-	ErrVMsWithUnsetEfsStorageClass = "There are VMs using an EFS storageclass where the gid and uid are not set in the storageclass."
-	ErrGoldenImagesNotUpToDate     = "There are golden images whose DataImportCron is not up to date or DataSource is not ready."
-	ErrGoldenImageNoDataSource     = "DataSource has no PVC or Snapshot source"
+	// errMissingVolumeSnapshotClass    = "there are StorageProfiles missing VolumeSnapshotClass"
+	// errVMsWithNonVirtRbdStorageClass = "there are VMs using the plain RBD storageclass when the virtualization storageclass exists"
+	ErrVMsWithUnsetEfsStorageClass = "there are VMs using an EFS storageclass where the gid and uid are not set in the storageclass"
+	ErrGoldenImagesNotUpToDate     = "there are golden images whose DataImportCron is not up to date or DataSource is not ready"
+	ErrGoldenImageNoDataSource     = "dataSource has no PVC or Snapshot source"
 	MessageSkipNoGoldenImage       = "Skip check - no golden image PVC or Snapshot"
 	MessageSkipNoVMI               = "Skip check - no VMI"
 
