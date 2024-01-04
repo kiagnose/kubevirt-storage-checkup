@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	configv1 "github.com/openshift/api/config/v1"
 	assert "github.com/stretchr/testify/require"
 
 	corev1 "k8s.io/api/core/v1"
@@ -238,6 +239,7 @@ func newClientStub(clientConfig clientConfig) *clientStub {
 		clientConfig: clientConfig,
 	}
 }
+
 func (cs *clientStub) CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (
 	*kvcorev1.VirtualMachine, error) {
 	if cs.vmCreationFailure != nil {
@@ -619,6 +621,37 @@ func (cs *clientStub) GetDataSource(ctx context.Context, namespace, name string)
 		das.Status.Conditions[0].Status = corev1.ConditionFalse
 	}
 	return das, nil
+}
+
+func (cs *clientStub) GetClusterVersion(ctx context.Context, name string) (*configv1.ClusterVersion, error) {
+	ver := &configv1.ClusterVersion{
+		Status: configv1.ClusterVersionStatus{
+			History: []configv1.UpdateHistory{
+				{
+					State:   configv1.CompletedUpdate,
+					Version: "1.2.3",
+				},
+			},
+		},
+	}
+
+	return ver, nil
+}
+
+func (cs *clientStub) ListCDIs(ctx context.Context) (*cdiv1.CDIList, error) {
+	cdis := &cdiv1.CDIList{
+		Items: []cdiv1.CDI{
+			{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app.kubernetes.io/version": "4.5.6",
+					},
+				},
+			},
+		},
+	}
+
+	return cdis, nil
 }
 
 func (cs *clientStub) VMIName(namePrefix string) string {

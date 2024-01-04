@@ -28,6 +28,9 @@ import (
 	"k8s.io/client-go/rest"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	configv1 "github.com/openshift/api/config/v1"
+	configv1client "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
+
 	kvcorev1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
@@ -35,6 +38,7 @@ import (
 
 type Client struct {
 	kubecli.KubevirtClient
+	configv1client.ClusterVersionsGetter
 }
 
 func New() (*Client, error) {
@@ -48,89 +52,102 @@ func New() (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{client}, nil
+	oClient, err := configv1client.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Client{client, oClient}, nil
 }
 
 func (c *Client) CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (
 	*kvcorev1.VirtualMachine, error) {
-	return c.KubevirtClient.VirtualMachine(namespace).Create(ctx, vm)
+	return c.VirtualMachine(namespace).Create(ctx, vm)
 }
 
 func (c *Client) DeleteVirtualMachine(ctx context.Context, namespace, name string) error {
-	return c.KubevirtClient.VirtualMachine(namespace).Delete(ctx, name, &metav1.DeleteOptions{})
+	return c.VirtualMachine(namespace).Delete(ctx, name, &metav1.DeleteOptions{})
 }
 
 func (c *Client) GetVirtualMachineInstance(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachineInstance, error) {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).Get(ctx, name, &metav1.GetOptions{})
+	return c.VirtualMachineInstance(namespace).Get(ctx, name, &metav1.GetOptions{})
 }
 
 func (c *Client) CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
 	vmim *kvcorev1.VirtualMachineInstanceMigration) (*kvcorev1.VirtualMachineInstanceMigration, error) {
-	return c.KubevirtClient.VirtualMachineInstanceMigration(namespace).Create(vmim, &metav1.CreateOptions{})
+	return c.VirtualMachineInstanceMigration(namespace).Create(vmim, &metav1.CreateOptions{})
 }
 
 func (c *Client) AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
 	addVolumeOptions *kvcorev1.AddVolumeOptions) error {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).AddVolume(ctx, name, addVolumeOptions)
+	return c.VirtualMachineInstance(namespace).AddVolume(ctx, name, addVolumeOptions)
 }
 
 func (c *Client) RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
 	removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).RemoveVolume(ctx, name, removeVolumeOptions)
+	return c.VirtualMachineInstance(namespace).RemoveVolume(ctx, name, removeVolumeOptions)
 }
 
 func (c *Client) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {
-	return c.KubevirtClient.CdiClient().CdiV1beta1().DataVolumes(namespace).Create(ctx, dv, metav1.CreateOptions{})
+	return c.CdiClient().CdiV1beta1().DataVolumes(namespace).Create(ctx, dv, metav1.CreateOptions{})
 }
 
 func (c *Client) DeleteDataVolume(ctx context.Context, namespace, name string) error {
-	return c.KubevirtClient.CdiClient().CdiV1beta1().DataVolumes(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	return c.CdiClient().CdiV1beta1().DataVolumes(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 func (c *Client) DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error {
-	return c.KubevirtClient.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
+	return c.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
 func (c *Client) ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error) {
-	return c.KubevirtClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	return c.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error) {
-	return c.KubevirtClient.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+	return c.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) ListStorageProfiles(ctx context.Context) (*cdiv1.StorageProfileList, error) {
-	return c.KubevirtClient.CdiClient().CdiV1beta1().StorageProfiles().List(ctx, metav1.ListOptions{})
+	return c.CdiClient().CdiV1beta1().StorageProfiles().List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv1.VolumeSnapshotClassList, error) {
-	return c.KubevirtClient.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshotClasses().List(ctx, metav1.ListOptions{})
+	return c.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshotClasses().List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error) {
-	return c.KubevirtClient.CdiClient().CdiV1beta1().DataImportCrons(namespace).List(ctx, metav1.ListOptions{})
+	return c.CdiClient().CdiV1beta1().DataImportCrons(namespace).List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error) {
-	return c.KubevirtClient.VirtualMachineInstance(namespace).List(ctx, &metav1.ListOptions{})
+	return c.VirtualMachineInstance(namespace).List(ctx, &metav1.ListOptions{})
+}
+
+func (c *Client) ListCDIs(ctx context.Context) (*cdiv1.CDIList, error) {
+	return c.CdiClient().CdiV1beta1().CDIs().List(ctx, metav1.ListOptions{})
 }
 
 func (c *Client) GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
-	return c.KubevirtClient.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
+	return c.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 func (c *Client) GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error) {
-	return c.KubevirtClient.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
+	return c.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
 }
 
 func (c *Client) GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error) {
-	return c.KubevirtClient.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshots(namespace).Get(ctx, name, metav1.GetOptions{})
+	return c.KubernetesSnapshotClient().SnapshotV1().VolumeSnapshots(namespace).Get(ctx, name, metav1.GetOptions{})
 }
 
 func (c *Client) GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error) {
-	return c.KubevirtClient.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
+	return c.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
 }
 
 func (c *Client) GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error) {
-	return c.KubevirtClient.CdiClient().CdiV1beta1().DataSources(namespace).Get(ctx, name, metav1.GetOptions{})
+	return c.CdiClient().CdiV1beta1().DataSources(namespace).Get(ctx, name, metav1.GetOptions{})
+}
+
+func (c *Client) GetClusterVersion(ctx context.Context, name string) (*configv1.ClusterVersion, error) {
+	return c.ClusterVersions().Get(ctx, name, metav1.GetOptions{})
 }

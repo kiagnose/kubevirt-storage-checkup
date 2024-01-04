@@ -39,6 +39,7 @@ import (
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	configv1 "github.com/openshift/api/config/v1"
 
 	kvcorev1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
@@ -62,11 +63,13 @@ type kubeVirtStorageClient interface {
 	ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv1.VolumeSnapshotClassList, error)
 	ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error)
 	ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error)
+	ListCDIs(ctx context.Context) (*cdiv1.CDIList, error)
 	GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error)
 	GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error)
 	GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error)
 	GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error)
 	GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error)
+	GetClusterVersion(ctx context.Context, name string) (*configv1.ClusterVersion, error)
 }
 
 const (
@@ -131,6 +134,10 @@ func (c *Checkup) Setup(ctx context.Context) error {
 func (c *Checkup) Run(ctx context.Context) error {
 	errStr := ""
 
+	if err := c.checkVersions(ctx, &errStr); err != nil {
+		return err
+	}
+
 	scs, err := c.client.ListStorageClasses(ctx)
 	if err != nil {
 		return err
@@ -176,6 +183,36 @@ func (c *Checkup) Run(ctx context.Context) error {
 	if errStr != "" {
 		return errors.New(errStr)
 	}
+
+	return nil
+}
+
+func (c *Checkup) checkVersions(ctx context.Context, errStr *string) error {
+	log.Print("checkVersions")
+
+	ver, err := c.client.GetClusterVersion(ctx, "version")
+	if err != nil {
+		return err
+	}
+	ocpVersion := ""
+	for _, update := range ver.Status.History {
+		if update.State == configv1.CompletedUpdate {
+			// obtain the version from the last completed update
+			ocpVersion = update.Version
+			break
+		}
+	}
+
+	cdis, err := c.client.ListCDIs(ctx)
+	if err != nil {
+		return err
+	}
+	if len(cdis.Items) != 1 {
+		return errors.New("Expecting single CDI instance in cluster")
+	}
+	cnvVersion := cdis.Items[0].Labels["app.kubernetes.io/version"]
+
+	log.Printf("OCP version: %s, CNV version: %s", ocpVersion, cnvVersion)
 
 	return nil
 }
