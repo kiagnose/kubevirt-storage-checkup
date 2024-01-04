@@ -134,7 +134,7 @@ func (c *Checkup) Setup(ctx context.Context) error {
 func (c *Checkup) Run(ctx context.Context) error {
 	errStr := ""
 
-	if err := c.checkVersions(ctx, &errStr); err != nil {
+	if err := c.checkVersions(ctx); err != nil {
 		return err
 	}
 
@@ -187,7 +187,7 @@ func (c *Checkup) Run(ctx context.Context) error {
 	return nil
 }
 
-func (c *Checkup) checkVersions(ctx context.Context, errStr *string) error {
+func (c *Checkup) checkVersions(ctx context.Context) error {
 	log.Print("checkVersions")
 
 	ver, err := c.client.GetClusterVersion(ctx, "version")
@@ -208,7 +208,7 @@ func (c *Checkup) checkVersions(ctx context.Context, errStr *string) error {
 		return err
 	}
 	if len(cdis.Items) != 1 {
-		return errors.New("Expecting single CDI instance in cluster")
+		return errors.New("expecting single CDI instance in cluster")
 	}
 	cnvVersion := cdis.Items[0].Labels["app.kubernetes.io/version"]
 
