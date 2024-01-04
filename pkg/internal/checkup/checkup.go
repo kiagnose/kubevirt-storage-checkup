@@ -207,12 +207,17 @@ func (c *Checkup) checkVersions(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if len(cdis.Items) == 0 {
+		return errors.New("no CDI deployed in cluster")
+	}
 	if len(cdis.Items) != 1 {
 		return errors.New("expecting single CDI instance in cluster")
 	}
 	cnvVersion := cdis.Items[0].Labels["app.kubernetes.io/version"]
 
 	log.Printf("OCP version: %s, CNV version: %s", ocpVersion, cnvVersion)
+	c.results.OCPVersion = ocpVersion
+	c.results.CNVVersion = cnvVersion
 
 	return nil
 }

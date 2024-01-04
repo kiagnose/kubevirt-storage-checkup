@@ -62,11 +62,12 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 		var checkupStatus status.Status
 		checkupStatus.StartTimestamp = time.Now()
 		assert.NoError(t, testReporter.Report(checkupStatus))
-
 		checkupStatus.FailureReason = []string{}
 		checkupStatus.CompletionTimestamp = time.Now()
 		checkupStatus.Results = status.Results{
-			DefaultStorageClass:                       "test_sc",
+			OCPVersion:          "1.2.3",
+			CNVVersion:          "4.5.6",
+			DefaultStorageClass: "test_sc",
 			StorageProfilesWithEmptyClaimPropertySets: "sc1, sc2",
 			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
 			StorageWithRWX:                            "sc5, sc6",
@@ -80,7 +81,6 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			VMLiveMigration:                           "success",
 			VMHotplugVolume:                           "fail",
 		}
-
 		assert.NoError(t, testReporter.Report(checkupStatus))
 
 		expectedReportData := map[string]string{
@@ -88,6 +88,8 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.failureReason":                                    "",
 			"status.startTimestamp":                                   timestamp(checkupStatus.StartTimestamp),
 			"status.completionTimestamp":                              timestamp(checkupStatus.CompletionTimestamp),
+			"status.result.ocpVersion":                                checkupStatus.Results.OCPVersion,
+			"status.result.cnvVersion":                                checkupStatus.Results.CNVVersion,
 			"status.result.defaultStorageClass":                       checkupStatus.Results.DefaultStorageClass,
 			"status.result.storageProfilesWithEmptyClaimPropertySets": checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
 			"status.result.storageProfilesWithSpecClaimPropertySets":  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
@@ -102,7 +104,6 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.result.vmLiveMigration":                           checkupStatus.Results.VMLiveMigration,
 			"status.result.vmHotplugVolume":                           checkupStatus.Results.VMHotplugVolume,
 		}
-
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
 	})
 

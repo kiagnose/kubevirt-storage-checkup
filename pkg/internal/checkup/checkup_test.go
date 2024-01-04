@@ -48,11 +48,13 @@ const (
 )
 
 var (
-	testVMIName = "test-vmi"
-	testScName  = "test-sc"
-	testScName2 = "test-sc2"
-	efsSc       = "efs.csi.aws.com"
-	testDIC     = "test-dic"
+	testVMIName    = "test-vmi"
+	testScName     = "test-sc"
+	testScName2    = "test-sc2"
+	efsSc          = "efs.csi.aws.com"
+	testDIC        = "test-dic"
+	testOCPVersion = "1.2.3"
+	testCNVVersion = "4.5.6"
 )
 
 func TestCheckupShouldSucceed(t *testing.T) {
@@ -191,6 +193,8 @@ func expectedResultsNoVMI(expectedResults map[string]string) {
 // FIXME: fill relevant results
 func successfulRunResults(vmiUnderTestName string) map[string]string {
 	return map[string]string{
+		reporter.OCPVersionKey:                                testOCPVersion,
+		reporter.CNVVersionKey:                                testCNVVersion,
 		reporter.DefaultStorageClassKey:                       testScName,
 		reporter.StorageProfilesWithEmptyClaimPropertySetsKey: "",
 		reporter.StorageProfilesWithSpecClaimPropertySetsKey:  "",
@@ -628,8 +632,16 @@ func (cs *clientStub) GetClusterVersion(ctx context.Context, name string) (*conf
 		Status: configv1.ClusterVersionStatus{
 			History: []configv1.UpdateHistory{
 				{
+					State:   configv1.PartialUpdate,
+					Version: "partial-version",
+				},
+				{
 					State:   configv1.CompletedUpdate,
-					Version: "1.2.3",
+					Version: testOCPVersion,
+				},
+				{
+					State:   configv1.CompletedUpdate,
+					Version: "old-version",
 				},
 			},
 		},
@@ -644,7 +656,7 @@ func (cs *clientStub) ListCDIs(ctx context.Context) (*cdiv1.CDIList, error) {
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app.kubernetes.io/version": "4.5.6",
+						"app.kubernetes.io/version": testCNVVersion,
 					},
 				},
 			},
