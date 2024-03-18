@@ -22,8 +22,6 @@ package pkg
 import (
 	"context"
 
-	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
-
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/client"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
@@ -37,12 +35,12 @@ func Run(rawEnv map[string]string, namespace string) error {
 		return err
 	}
 
-	baseConfig, err := kconfig.Read(c, rawEnv)
+	baseConfig, err := config.ReadWithDefaults(c, rawEnv)
 	if err != nil {
 		return err
 	}
 
-	cfg, err := config.New(c, baseConfig)
+	cfg, err := config.New(baseConfig)
 	if err != nil {
 		return err
 	}
