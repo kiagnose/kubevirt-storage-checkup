@@ -20,32 +20,52 @@
 package config
 
 import (
+	"errors"
+
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
 	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
-
-	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/client"
+	"github.com/kiagnose/kiagnose/kiagnose/types"
+	"k8s.io/client-go/kubernetes"
 )
 
 // FIXME: pass something here - maybe golden image ns?
 type Config struct {
 }
 
-func New(c *client.Client, baseConfig kconfig.Config) (Config, error) {
+func New(baseConfig kconfig.Config) (Config, error) {
 	newConfig := Config{}
-	err := signConfigMap(c, baseConfig)
-	return newConfig, err
+	return newConfig, nil
 }
 
-func signConfigMap(c *client.Client, baseConfig kconfig.Config) error {
-	cm, err := kconfigmap.Get(c, baseConfig.ConfigMapNamespace, baseConfig.ConfigMapName)
-	if err != nil {
-		return err
+// ReadWithDefaults inits the configmap with defaults where needed before reading it by kiagnose config infra
+func ReadWithDefaults(client kubernetes.Interface, rawEnv map[string]string) (kconfig.Config, error) {
+	cmNamespace := rawEnv[kconfig.ConfigMapNamespaceEnvVarName]
+	cmName := rawEnv[kconfig.ConfigMapNameEnvVarName]
+	if cmNamespace == "" || cmName == "" {
+		return kconfig.Config{}, errors.New("no environment variables set for configmap namespace and name")
 	}
+
+	cm, err := kconfigmap.Get(client, cmNamespace, cmName)
+	if err != nil {
+		return kconfig.Config{}, err
+	}
+
 	if cm.Labels == nil {
 		cm.Labels = map[string]string{}
 	}
 	cm.Labels["kiagnose/checkup-type"] = "kubevirt-vm-storage"
-	_, err = kconfigmap.Update(c, cm)
 
-	return err
+	if cm.Data == nil {
+		cm.Data = make(map[string]string)
+	}
+	_, exists := cm.Data[types.TimeoutKey]
+	if !exists {
+		cm.Data[types.TimeoutKey] = "10m"
+	}
+
+	if _, err = kconfigmap.Update(client, cm); err != nil {
+		return kconfig.Config{}, err
+	}
+
+	return kconfig.Read(client, rawEnv)
 }

@@ -18,3 +18,82 @@
  */
 
 package config_test
+
+import (
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
+	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
+	"github.com/kiagnose/kiagnose/kiagnose/types"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
+
+	"github.com/stretchr/testify/assert"
+)
+
+const (
+	testNamespace     = "target-ns"
+	testConfigMapName = "storage-checkup-config"
+	testPodName       = "test-pod"
+)
+
+var testEnv = map[string]string{
+	kconfig.ConfigMapNamespaceEnvVarName: testNamespace,
+	kconfig.ConfigMapNameEnvVarName:      testConfigMapName,
+	kconfig.PodNameEnvVarName:            testPodName,
+}
+
+func TestInitConfigMapShouldFailWhenNoConfigMap(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset()
+	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	assert.ErrorContains(t, err, "not found")
+}
+
+func TestInitConfigMapShouldFailWhenNoEnvVars(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset(newConfigMap())
+	emptyEnv := map[string]string{}
+	_, err := config.ReadWithDefaults(fakeClient, emptyEnv)
+	assert.ErrorContains(t, err, "no environment variables")
+}
+
+func TestInitConfigMapShouldSucceed(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset(newConfigMap())
+	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	assert.NoError(t, err)
+
+	cm, err := kconfigmap.Get(fakeClient, testNamespace, testConfigMapName)
+	assert.NoError(t, err)
+	assert.NotNil(t, cm.Labels)
+	assert.Equal(t, "kubevirt-vm-storage", cm.Labels["kiagnose/checkup-type"])
+	assert.NotNil(t, cm.Data)
+	assert.Equal(t, "10m", cm.Data[types.TimeoutKey])
+}
+
+func TestInitConfigMapShouldNotUpdateTimeout(t *testing.T) {
+	cm := newConfigMap()
+	cm.Data[types.TimeoutKey] = "15m"
+	fakeClient := fake.NewSimpleClientset(cm)
+	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	assert.NoError(t, err)
+
+	cm, err = kconfigmap.Get(fakeClient, testNamespace, testConfigMapName)
+	assert.NoError(t, err)
+	assert.NotNil(t, cm.Labels)
+	assert.Equal(t, "kubevirt-vm-storage", cm.Labels["kiagnose/checkup-type"])
+	assert.NotNil(t, cm.Data)
+	assert.Equal(t, "15m", cm.Data[types.TimeoutKey])
+}
+
+func newConfigMap() *corev1.ConfigMap {
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testConfigMapName,
+			Namespace: testNamespace,
+		},
+		Data: map[string]string{},
+	}
+}
