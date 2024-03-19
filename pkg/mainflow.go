@@ -35,7 +35,7 @@ func Run(rawEnv map[string]string, namespace string) error {
 		return err
 	}
 
-	baseConfig, err := config.ReadWithDefaults(c, rawEnv)
+	baseConfig, err := config.ReadWithDefaults(c, namespace, rawEnv)
 	if err != nil {
 		return err
 	}

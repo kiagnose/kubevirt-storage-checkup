@@ -20,29 +20,45 @@
 package config
 
 import (
+	"context"
 	"errors"
 
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
 	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
 	"github.com/kiagnose/kiagnose/kiagnose/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-// FIXME: pass something here - maybe golden image ns?
 type Config struct {
+	PodName string
+	PodUID  string
 }
 
 func New(baseConfig kconfig.Config) (Config, error) {
-	newConfig := Config{}
+	newConfig := Config{
+		PodName: baseConfig.PodName,
+		PodUID:  baseConfig.PodUID,
+	}
 	return newConfig, nil
 }
 
 // ReadWithDefaults inits the configmap with defaults where needed before reading it by kiagnose config infra
-func ReadWithDefaults(client kubernetes.Interface, rawEnv map[string]string) (kconfig.Config, error) {
+func ReadWithDefaults(client kubernetes.Interface, namespace string, rawEnv map[string]string) (kconfig.Config, error) {
 	cmNamespace := rawEnv[kconfig.ConfigMapNamespaceEnvVarName]
 	cmName := rawEnv[kconfig.ConfigMapNameEnvVarName]
 	if cmNamespace == "" || cmName == "" {
 		return kconfig.Config{}, errors.New("no environment variables set for configmap namespace and name")
+	}
+
+	podName := rawEnv[kconfig.PodNameEnvVarName]
+	podUID := rawEnv[kconfig.PodUIDEnvVarName]
+	if podName != "" && podUID == "" {
+		pod, err := client.CoreV1().Pods(namespace).Get(context.Background(), podName, metav1.GetOptions{})
+		if err != nil {
+			return kconfig.Config{}, err
+		}
+		rawEnv[kconfig.PodUIDEnvVarName] = string(pod.UID)
 	}
 
 	cm, err := kconfigmap.Get(client, cmNamespace, cmName)

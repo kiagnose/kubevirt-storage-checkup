@@ -38,31 +38,33 @@ import (
 const (
 	testNamespace     = "target-ns"
 	testConfigMapName = "storage-checkup-config"
-	testPodName       = "test-pod"
+	testPodName       = "pod"
+	testPodUID        = "uid"
 )
 
 var testEnv = map[string]string{
 	kconfig.ConfigMapNamespaceEnvVarName: testNamespace,
 	kconfig.ConfigMapNameEnvVarName:      testConfigMapName,
 	kconfig.PodNameEnvVarName:            testPodName,
+	kconfig.PodUIDEnvVarName:             testPodUID,
 }
 
 func TestInitConfigMapShouldFailWhenNoConfigMap(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
-	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnv)
 	assert.ErrorContains(t, err, "not found")
 }
 
 func TestInitConfigMapShouldFailWhenNoEnvVars(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(newConfigMap())
 	emptyEnv := map[string]string{}
-	_, err := config.ReadWithDefaults(fakeClient, emptyEnv)
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, emptyEnv)
 	assert.ErrorContains(t, err, "no environment variables")
 }
 
 func TestInitConfigMapShouldSucceed(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset(newConfigMap())
-	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnv)
 	assert.NoError(t, err)
 
 	cm, err := kconfigmap.Get(fakeClient, testNamespace, testConfigMapName)
@@ -77,7 +79,7 @@ func TestInitConfigMapShouldNotUpdateTimeout(t *testing.T) {
 	cm := newConfigMap()
 	cm.Data[types.TimeoutKey] = "15m"
 	fakeClient := fake.NewSimpleClientset(cm)
-	_, err := config.ReadWithDefaults(fakeClient, testEnv)
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnv)
 	assert.NoError(t, err)
 
 	cm, err = kconfigmap.Get(fakeClient, testNamespace, testConfigMapName)
