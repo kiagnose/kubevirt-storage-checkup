@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	kvcorev1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
@@ -53,6 +54,8 @@ var (
 	testScName2    = "test-sc2"
 	efsSc          = "efs.csi.aws.com"
 	testDIC        = "test-dic"
+	testPodName    = "test-pod"
+	testPodUID     = "test-uid"
 	testOCPVersion = "1.2.3"
 	testCNVVersion = "4.5.6"
 )
@@ -155,6 +158,7 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 				assert.Empty(t, vmiUnderTestName)
 			} else {
 				assert.NotEmpty(t, vmiUnderTestName)
+				checkOwnerRef(t, testClient)
 			}
 
 			expectedResults := fullExpectedResults(vmiUnderTestName, tc.expectedResults)
@@ -168,6 +172,17 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			}
 		})
 	}
+}
+
+func checkOwnerRef(t *testing.T, testClient *clientStub) {
+	vmiUnderTestName := testClient.VMIName(checkup.VMIUnderTestNamePrefix)
+	vmFullName := objectFullName(testNamespace, vmiUnderTestName)
+	vm, exists := testClient.createdVMs[vmFullName]
+	assert.True(t, exists)
+	assert.Len(t, vm.OwnerReferences, 1)
+	ownerRef := vm.OwnerReferences[0]
+	assert.Equal(t, ownerRef.Name, testPodName)
+	assert.Equal(t, ownerRef.UID, types.UID(testPodUID))
 }
 
 func fullExpectedResults(vmiUnderTestName string, expectedResults map[string]string) map[string]string {
@@ -677,7 +692,10 @@ func (cs *clientStub) VMIName(namePrefix string) string {
 }
 
 func newTestConfig() config.Config {
-	return config.Config{}
+	return config.Config{
+		PodName: testPodName,
+		PodUID:  testPodUID,
+	}
 }
 
 func objectFullName(namespace, name string) string {

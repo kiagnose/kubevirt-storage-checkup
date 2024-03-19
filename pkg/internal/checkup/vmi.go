@@ -21,6 +21,7 @@ package checkup
 
 import (
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/vmi"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 
@@ -35,11 +36,13 @@ const (
 	terminationGracePeriodSeconds = 0
 )
 
-func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot) *kvcorev1.VirtualMachine {
+func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
+	checkupConfig config.Config) *kvcorev1.VirtualMachine {
 	optionsToApply := []vmi.Option{
 		vmi.WithDataVolume(rootDiskName, pvc, snap),
 		vmi.WithMemory(guestMemory),
 		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
+		vmi.WithOwnerReference(checkupConfig.PodName, checkupConfig.PodUID),
 	}
 	return vmi.NewVM(name, optionsToApply...)
 }

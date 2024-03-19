@@ -31,6 +31,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -106,6 +107,7 @@ var UnsupportedProvisioners = map[string]struct{}{
 type Checkup struct {
 	client          kubeVirtStorageClient
 	namespace       string
+	checkupConfig   config.Config
 	goldenImageScs  []string
 	goldenImagePvc  *corev1.PersistentVolumeClaim
 	goldenImageSnap *snapshotv1.VolumeSnapshot
@@ -122,8 +124,9 @@ type goldenImagesCheckState struct {
 
 func New(client kubeVirtStorageClient, namespace string, checkupConfig config.Config) *Checkup {
 	return &Checkup{
-		client:    client,
-		namespace: namespace,
+		client:        client,
+		namespace:     namespace,
+		checkupConfig: checkupConfig,
 	}
 }
 
@@ -697,7 +700,7 @@ func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
 	}
 
 	vmName := fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
-	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap)
+	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig)
 	log.Printf("Creating VM %q", vmName)
 	if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, c.vmUnderTest); err != nil {
 		return fmt.Errorf("failed to create VM: %w", err)
@@ -804,6 +807,12 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 	dv := &cdiv1.DataVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: hotplugVolumeName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       c.checkupConfig.PodName,
+				UID:        types.UID(c.checkupConfig.PodUID),
+			}},
 		},
 		Spec: c.vmUnderTest.Spec.DataVolumeTemplates[0].Spec,
 	}

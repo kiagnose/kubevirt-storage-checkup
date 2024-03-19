@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	kvcorev1 "kubevirt.io/api/core/v1"
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
@@ -35,7 +36,7 @@ const (
 	Disable = "disable"
 )
 
-type Option func(vmSpec *kvcorev1.VirtualMachineSpec)
+type Option func(vm *kvcorev1.VirtualMachine)
 
 func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	newVM := &kvcorev1.VirtualMachine{
@@ -53,14 +54,14 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	}
 
 	for _, f := range options {
-		f(&newVM.Spec)
+		f(newVM)
 	}
 
 	return newVM
 }
 
 func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot) Option {
-	return func(vmSpec *kvcorev1.VirtualMachineSpec) {
+	return func(vm *kvcorev1.VirtualMachine) {
 		dvt := kvcorev1.DataVolumeTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: OSDataVolumName,
@@ -84,7 +85,7 @@ func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *
 			}
 		}
 
-		vmSpec.DataVolumeTemplates = append(vmSpec.DataVolumeTemplates, dvt)
+		vm.Spec.DataVolumeTemplates = append(vm.Spec.DataVolumeTemplates, dvt)
 
 		newVolume := kvcorev1.Volume{
 			Name: volumeName,
@@ -94,22 +95,35 @@ func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *
 				},
 			},
 		}
-		vmSpec.Template.Spec.Volumes = append(vmSpec.Template.Spec.Volumes, newVolume)
+		vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, newVolume)
 	}
 }
 
 func WithMemory(guestMemory string) Option {
-	return func(vmSpec *kvcorev1.VirtualMachineSpec) {
+	return func(vm *kvcorev1.VirtualMachine) {
 		guestMemoryQuantity := resource.MustParse(guestMemory)
-		vmSpec.Template.Spec.Domain.Memory = &kvcorev1.Memory{
+		vm.Spec.Template.Spec.Domain.Memory = &kvcorev1.Memory{
 			Guest: &guestMemoryQuantity,
 		}
 	}
 }
 
 func WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds int64) Option {
-	return func(vmSpec *kvcorev1.VirtualMachineSpec) {
-		vmSpec.Template.Spec.TerminationGracePeriodSeconds = Pointer(terminationGracePeriodSeconds)
+	return func(vm *kvcorev1.VirtualMachine) {
+		vm.Spec.Template.Spec.TerminationGracePeriodSeconds = Pointer(terminationGracePeriodSeconds)
+	}
+}
+
+func WithOwnerReference(ownerName, ownerUID string) Option {
+	return func(vm *kvcorev1.VirtualMachine) {
+		if ownerUID != "" && ownerName != "" {
+			vm.ObjectMeta.OwnerReferences = append(vm.ObjectMeta.OwnerReferences, metav1.OwnerReference{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       ownerName,
+				UID:        types.UID(ownerUID),
+			})
+		}
 	}
 }
 
