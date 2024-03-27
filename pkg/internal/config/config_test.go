@@ -49,6 +49,12 @@ var testEnv = map[string]string{
 	kconfig.PodUIDEnvVarName:             testPodUID,
 }
 
+var testEnvNoPodUID = map[string]string{
+	kconfig.ConfigMapNamespaceEnvVarName: testNamespace,
+	kconfig.ConfigMapNameEnvVarName:      testConfigMapName,
+	kconfig.PodNameEnvVarName:            testPodName,
+}
+
 func TestInitConfigMapShouldFailWhenNoConfigMap(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset()
 	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnv)
@@ -60,6 +66,27 @@ func TestInitConfigMapShouldFailWhenNoEnvVars(t *testing.T) {
 	emptyEnv := map[string]string{}
 	_, err := config.ReadWithDefaults(fakeClient, testNamespace, emptyEnv)
 	assert.ErrorContains(t, err, "no environment variables")
+}
+
+func TestInitConfigMapShouldSucceedWithMissingPodID(t *testing.T) {
+	testPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: testNamespace,
+		},
+	}
+	fakeClient := fake.NewSimpleClientset(newConfigMap(), testPod)
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnvNoPodUID)
+	assert.NoError(t, err)
+
+	_, err = kconfigmap.Get(fakeClient, testNamespace, testConfigMapName)
+	assert.NoError(t, err)
+}
+
+func TestInitConfigMapShouldFailWithMissingPodIDAndMissingPod(t *testing.T) {
+	fakeClient := fake.NewSimpleClientset(newConfigMap())
+	_, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnvNoPodUID)
+	assert.ErrorContains(t, err, "not found")
 }
 
 func TestInitConfigMapShouldSucceed(t *testing.T) {
