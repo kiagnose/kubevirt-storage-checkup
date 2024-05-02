@@ -4,7 +4,7 @@ CHECKUP_IMAGE_NAME ?= quay.io/kiagnose/kubevirt-storage-checkup
 CHECKUP_IMAGE_TAG ?= devel
 
 GO_IMAGE_NAME := docker.io/library/golang
-GO_IMAGE_TAG := 1.19.4-bullseye
+GO_IMAGE_TAG := 1.21
 
 LINTER_IMAGE_NAME := docker.io/golangci/golangci-lint
 LINTER_IMAGE_TAG := v1.50.1
