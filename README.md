@@ -31,7 +31,9 @@ Cluster admin should create the following cluster-reader permissions for dedicat
 
 |Key|Description|Is Mandatory|Remarks|
 |---------------------------------------------|-------------------------------------------------------------------------------------------------------------------|--------------|-------------------------------------------------------------------------------------|
-|spec.timeout|How much time before the checkup will try to close itself|True||
+|spec.timeout|How much time before the checkup will try to close itself|False|Default is 10m|
+|spec.param.storageClass|Optional storage class to be used instead of the default one|False||
+|spec.param.vmiTimeout|Optional timeout for VMI operations|False|Default is 3m|
 
 ### Example
 
@@ -64,10 +66,11 @@ kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 |status.result.defaultStorageClass|Indicates whether there is a default storage class||
 |status.result.pvcBound|PVC created and bound by the provisioner||
 |status.result.storageProfilesWithEmptyClaimPropertySets|StorageProfiles with empty claimPropertySets (unknown provisioners)||
-|status.result.storageProfilesWithSpecClaimPropertySets|StorageProfiles with spec-overrriden claimPropertySets||
+|status.result.storageProfilesWithSpecClaimPropertySets|StorageProfiles with spec-overriden claimPropertySets||
 |status.result.storageWithRWX|Storage with RWX access mode||
 |status.result.storageMissingVolumeSnapshotClass|Storage using snapshot-based clone but missing VolumeSnapshotClass||
 |status.result.goldenImagesNotUpToDate|Golden images whose DataImportCron is not up to date or DataSource is not ready||
+|status.result.goldenImagesNoDataSource|Golden images with no DataSource||
 |status.result.vmsWithNonVirtRbdStorageClass|VMs using the plain RBD storageclass when the virtualization storageclass exists||
 |status.result.vmsWithUnsetEfsStorageClass|VMs using an EFS storageclass where the gid and uid are not set in the storageclass||
 |status.result.vmBootFromGoldenImage|VM created and started from a golden image||

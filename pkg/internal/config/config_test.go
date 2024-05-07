@@ -21,6 +21,7 @@ package config_test
 
 import (
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,6 +39,8 @@ import (
 const (
 	testNamespace     = "target-ns"
 	testConfigMapName = "storage-checkup-config"
+	testStorageClass  = "test-sc"
+	testVMITimeout    = "1m"
 	testPodName       = "pod"
 	testPodUID        = "uid"
 )
@@ -115,6 +118,26 @@ func TestInitConfigMapShouldNotUpdateTimeout(t *testing.T) {
 	assert.Equal(t, "kubevirt-vm-storage", cm.Labels["kiagnose/checkup-type"])
 	assert.NotNil(t, cm.Data)
 	assert.Equal(t, "15m", cm.Data[types.TimeoutKey])
+}
+
+func TestNewConfigMapOptionalParams(t *testing.T) {
+	cm := newConfigMap()
+	cm.Data[types.ParamNameKeyPrefix+config.StorageClassParamName] = testStorageClass
+	cm.Data[types.ParamNameKeyPrefix+config.VMITimeoutParamName] = testVMITimeout
+
+	fakeClient := fake.NewSimpleClientset(cm)
+	baseConfig, err := config.ReadWithDefaults(fakeClient, testNamespace, testEnv)
+	assert.NoError(t, err)
+
+	assert.Equal(t, testStorageClass, baseConfig.Params[config.StorageClassParamName])
+	assert.Equal(t, testVMITimeout, baseConfig.Params[config.VMITimeoutParamName])
+
+	cfg, err := config.New(baseConfig)
+	assert.NoError(t, err)
+	assert.Equal(t, testStorageClass, cfg.StorageClass)
+	duration, err := time.ParseDuration(testVMITimeout)
+	assert.NoError(t, err)
+	assert.Equal(t, duration, cfg.VMITimeout)
 }
 
 func newConfigMap() *corev1.ConfigMap {
