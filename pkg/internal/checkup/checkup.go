@@ -95,7 +95,6 @@ const (
 	MessageSkipNoVMI               = "Skip check - no VMI"
 
 	pollInterval = 5 * time.Second
-	pollDuration = 3 * time.Minute
 )
 
 // UnsupportedProvisioners is a hash of provisioners which are known not to work with CDI
@@ -291,8 +290,8 @@ func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs
 			return err
 		}
 
-		c.updategoldenImageSnapshot(snap)
-		c.updategoldenImagePvc(pvc, cs)
+		c.updateGoldenImageSnapshot(snap)
+		c.updateGoldenImagePvc(pvc, cs)
 	}
 
 	return nil
@@ -349,14 +348,19 @@ func isDataSourceReady(conditions []cdiv1.DataSourceCondition) bool {
 	return false
 }
 
-func (c *Checkup) updategoldenImagePvc(pvc *corev1.PersistentVolumeClaim, cs *goldenImagesCheckState) {
+func (c *Checkup) updateGoldenImagePvc(pvc *corev1.PersistentVolumeClaim, cs *goldenImagesCheckState) {
 	if pvc == nil {
 		return
 	}
 
-	// Prefer golden image with default SC
+	// Prefer golden image with configured/default storage class
 	if c.goldenImagePvc != nil {
-		if sc := c.goldenImagePvc.Spec.StorageClassName; sc == nil || *sc == c.results.DefaultStorageClass {
+		sc := c.goldenImagePvc.Spec.StorageClassName
+		if sc == nil {
+			return
+		}
+		if *sc == c.results.DefaultStorageClass ||
+			(c.checkupConfig.StorageClass != "" && *sc == c.checkupConfig.StorageClass) {
 			return
 		}
 	}
@@ -371,7 +375,7 @@ func (c *Checkup) updategoldenImagePvc(pvc *corev1.PersistentVolumeClaim, cs *go
 	}
 }
 
-func (c *Checkup) updategoldenImageSnapshot(snap *snapshotv1.VolumeSnapshot) {
+func (c *Checkup) updateGoldenImageSnapshot(snap *snapshotv1.VolumeSnapshot) {
 	if snap != nil && c.goldenImageSnap == nil {
 		c.goldenImageSnap = snap
 	}
@@ -425,6 +429,11 @@ func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string
 				Blank: &cdiv1.DataVolumeBlankImage{},
 			},
 		},
+	}
+
+	if sc := c.checkupConfig.StorageClass; sc != "" {
+		log.Printf("PVC storage class %q", sc)
+		dv.Spec.Storage.StorageClassName = &sc
 	}
 
 	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {
@@ -961,7 +970,7 @@ func (c *Checkup) waitForVMIStatus(ctx context.Context, checkMsg string, result,
 	}
 
 	log.Printf("Waiting for VMI %q %s", vmName, checkMsg)
-	if err := wait.PollImmediateWithContext(ctx, pollInterval, pollDuration, conditionFn); err != nil {
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, conditionFn); err != nil {
 		res := fmt.Sprintf("failed waiting for VMI %q %s: %v", vmName, checkMsg, err)
 		log.Print(res)
 		appendSep(result, res)

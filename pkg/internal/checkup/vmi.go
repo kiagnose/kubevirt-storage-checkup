@@ -39,7 +39,7 @@ const (
 func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
 	checkupConfig config.Config) *kvcorev1.VirtualMachine {
 	optionsToApply := []vmi.Option{
-		vmi.WithDataVolume(rootDiskName, pvc, snap),
+		vmi.WithDataVolume(rootDiskName, pvc, snap, checkupConfig.StorageClass),
 		vmi.WithMemory(guestMemory),
 		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
 		vmi.WithOwnerReference(checkupConfig.PodName, checkupConfig.PodUID),

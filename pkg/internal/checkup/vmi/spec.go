@@ -60,7 +60,7 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	return newVM
 }
 
-func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot) Option {
+func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot, storageClass string) Option {
 	return func(vm *kvcorev1.VirtualMachine) {
 		dvt := kvcorev1.DataVolumeTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
@@ -77,12 +77,17 @@ func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *
 				Namespace: pvc.Namespace,
 				Name:      pvc.Name,
 			}
-			dvt.Spec.Storage.StorageClassName = pvc.Spec.StorageClassName
 		} else if snap != nil {
 			dvt.Spec.Source.Snapshot = &cdiv1.DataVolumeSourceSnapshot{
 				Namespace: snap.Namespace,
 				Name:      snap.Name,
 			}
+		}
+
+		if storageClass != "" {
+			dvt.Spec.Storage.StorageClassName = &storageClass
+		} else if pvc != nil {
+			dvt.Spec.Storage.StorageClassName = pvc.Spec.StorageClassName
 		}
 
 		vm.Spec.DataVolumeTemplates = append(vm.Spec.DataVolumeTemplates, dvt)

@@ -22,6 +22,7 @@ package config
 import (
 	"context"
 	"errors"
+	"time"
 
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
 	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
@@ -30,16 +31,50 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const (
+	StorageClassParamName = "storageClass"
+	VMITimeoutParamName   = "vmiTimeout"
+)
+
+const (
+	VMITimeoutDefault = 3 * time.Minute
+)
+
+var (
+	ErrInvalidVMITimeout = errors.New("invalid VMI timeout")
+)
+
 type Config struct {
-	PodName string
-	PodUID  string
+	PodName      string
+	PodUID       string
+	StorageClass string
+	VMITimeout   time.Duration
 }
 
 func New(baseConfig kconfig.Config) (Config, error) {
 	newConfig := Config{
-		PodName: baseConfig.PodName,
-		PodUID:  baseConfig.PodUID,
+		PodName:    baseConfig.PodName,
+		PodUID:     baseConfig.PodUID,
+		VMITimeout: VMITimeoutDefault,
 	}
+
+	return setOptionalParams(baseConfig, newConfig)
+}
+
+func setOptionalParams(baseConfig kconfig.Config, newConfig Config) (Config, error) {
+	var err error
+
+	if sc, exists := baseConfig.Params[StorageClassParamName]; exists {
+		newConfig.StorageClass = sc
+	}
+
+	if rawVal := baseConfig.Params[VMITimeoutParamName]; rawVal != "" {
+		newConfig.VMITimeout, err = time.ParseDuration(rawVal)
+		if err != nil {
+			return Config{}, ErrInvalidVMITimeout
+		}
+	}
+
 	return newConfig, nil
 }
 
