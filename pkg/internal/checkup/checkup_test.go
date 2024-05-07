@@ -103,6 +103,11 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
 			expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
 		},
+		"failPvcBound": {
+			clientConfig:    clientConfig{failPvcBound: true},
+			expectedResults: map[string]string{reporter.PVCBoundKey: checkup.ErrPvcNotBound},
+			expectedErr:     checkup.ErrPvcNotBound,
+		},
 		"storageProfileIncomplete": {
 			clientConfig: clientConfig{spIncomplete: true},
 			expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName,
@@ -211,6 +216,7 @@ func successfulRunResults(vmiUnderTestName string) map[string]string {
 		reporter.OCPVersionKey:                                testOCPVersion,
 		reporter.CNVVersionKey:                                testCNVVersion,
 		reporter.DefaultStorageClassKey:                       testScName,
+		reporter.PVCBoundKey:                                  "PVC \"checkup-pvc\" bound",
 		reporter.StorageProfilesWithEmptyClaimPropertySetsKey: "",
 		reporter.StorageProfilesWithSpecClaimPropertySetsKey:  "",
 		reporter.StorageWithRWXKey:                            testScName,
@@ -232,6 +238,7 @@ type clientConfig struct {
 	noStorageClasses              bool
 	noDefaultStorageClass         bool
 	multipleDefaultStorageClasses bool
+	failPvcBound                  bool
 	unsetEfsStorageClass          bool
 	spIncomplete                  bool
 	noVolumeSnapshotClasses       bool
@@ -558,8 +565,8 @@ func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, n
 	blockMode := corev1.PersistentVolumeBlock
 	pvc := &corev1.PersistentVolumeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pvc",
-			Namespace: testNamespace,
+			Name:      name,
+			Namespace: namespace,
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			VolumeMode:       &blockMode,
@@ -568,6 +575,12 @@ func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, n
 		Status: corev1.PersistentVolumeClaimStatus{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
 		},
+	}
+
+	if cs.failPvcBound {
+		pvc.Status.Phase = corev1.ClaimPending
+	} else {
+		pvc.Status.Phase = corev1.ClaimBound
 	}
 
 	if cs.cloneFallback {

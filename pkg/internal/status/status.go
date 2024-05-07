@@ -27,6 +27,7 @@ type Results struct {
 	OCPVersion                                string
 	CNVVersion                                string
 	DefaultStorageClass                       string
+	PVCBound                                  string
 	StorageProfilesWithEmptyClaimPropertySets string
 	StorageProfilesWithSpecClaimPropertySets  string
 	StorageWithRWX                            string

@@ -31,6 +31,7 @@ const (
 	OCPVersionKey                                = "ocpVersion"
 	CNVVersionKey                                = "cnvVersion"
 	DefaultStorageClassKey                       = "defaultStorageClass"
+	PVCBoundKey                                  = "pvcBound"
 	StorageProfilesWithEmptyClaimPropertySetsKey = "storageProfilesWithEmptyClaimPropertySets"
 	StorageProfilesWithSpecClaimPropertySetsKey  = "storageProfilesWithSpecClaimPropertySets"
 	StorageWithRWXKey                            = "storageWithRWX"
@@ -77,6 +78,7 @@ func FormatResults(checkupResults status.Results) map[string]string {
 		OCPVersionKey:          checkupResults.OCPVersion,
 		CNVVersionKey:          checkupResults.CNVVersion,
 		DefaultStorageClassKey: checkupResults.DefaultStorageClass,
+		PVCBoundKey:            checkupResults.PVCBound,
 		StorageProfilesWithEmptyClaimPropertySetsKey: checkupResults.StorageProfilesWithEmptyClaimPropertySets,
 		StorageProfilesWithSpecClaimPropertySetsKey:  checkupResults.StorageProfilesWithSpecClaimPropertySets,
 		StorageWithRWXKey:                    checkupResults.StorageWithRWX,

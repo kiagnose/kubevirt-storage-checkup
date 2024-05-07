@@ -30,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -76,10 +77,12 @@ type kubeVirtStorageClient interface {
 const (
 	VMIUnderTestNamePrefix = "vmi-under-test"
 	hotplugVolumeName      = "hotplug-volume"
+	pvcName                = "checkup-pvc"
 
 	AnnDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
 
 	ErrNoDefaultStorageClass         = "no default storage class"
+	ErrPvcNotBound                   = "pvc failed to bound"
 	ErrMultipleDefaultStorageClasses = "there are multiple default storage classes"
 	ErrEmptyClaimPropertySets        = "there are StorageProfiles with empty ClaimPropertySets (unknown provisioners)"
 	// FIXME: need to decide of we want to return errors in this cases
@@ -147,6 +150,10 @@ func (c *Checkup) Run(ctx context.Context) error {
 	}
 
 	c.checkDefaultStorageClass(scs, &errStr)
+	err = c.checkPVCCreationAndBinding(ctx, &errStr)
+	if err != nil {
+		return err
+	}
 
 	sps, err := c.client.ListStorageProfiles(ctx)
 	if err != nil {
@@ -388,6 +395,66 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 		c.results.DefaultStorageClass = ErrNoDefaultStorageClass
 		appendSep(errStr, ErrNoDefaultStorageClass)
 	}
+}
+
+func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string) error {
+	log.Print("checkPVCCreationAndBinding")
+
+	dv := &cdiv1.DataVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvcName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       c.checkupConfig.PodName,
+				UID:        types.UID(c.checkupConfig.PodUID),
+			}},
+			Annotations: map[string]string{
+				"cdi.kubevirt.io/storage.bind.immediate.requested": "true",
+			},
+		},
+		Spec: cdiv1.DataVolumeSpec{
+			Storage: &cdiv1.StorageSpec{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("20Mi"),
+					},
+				},
+			},
+			Source: &cdiv1.DataVolumeSource{
+				Blank: &cdiv1.DataVolumeBlankImage{},
+			},
+		},
+	}
+
+	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {
+		return err
+	}
+
+	c.waitForPVCBound(ctx, &c.results.PVCBound, errStr)
+
+	return c.client.DeleteDataVolume(ctx, c.namespace, pvcName)
+}
+
+func (c *Checkup) waitForPVCBound(ctx context.Context, result, errStr *string) {
+	conditionFn := func(ctx context.Context) (bool, error) {
+		pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, pvcName)
+		if err != nil {
+			return false, ignoreNotFound(err)
+		}
+		return pvc.Status.Phase == corev1.ClaimBound, nil
+	}
+
+	log.Printf("Waiting for PVC %q bound", pvcName)
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, time.Minute, conditionFn); err != nil {
+		appendSep(result, ErrPvcNotBound)
+		appendSep(errStr, ErrPvcNotBound)
+		return
+	}
+
+	res := fmt.Sprintf("PVC %q bound", pvcName)
+	log.Print(res)
+	appendSep(result, res)
 }
 
 // FIXME: check default SC hasSmartCloneAndRWX, and if not report the problem

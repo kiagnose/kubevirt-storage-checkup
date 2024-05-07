@@ -68,6 +68,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			OCPVersion:          "1.2.3",
 			CNVVersion:          "4.5.6",
 			DefaultStorageClass: "test_sc",
+			PVCBound:            "ok",
 			StorageProfilesWithEmptyClaimPropertySets: "sc1, sc2",
 			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
 			StorageWithRWX:                            "sc5, sc6",
@@ -91,6 +92,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.result.ocpVersion":                                checkupStatus.Results.OCPVersion,
 			"status.result.cnvVersion":                                checkupStatus.Results.CNVVersion,
 			"status.result.defaultStorageClass":                       checkupStatus.Results.DefaultStorageClass,
+			"status.result.pvcBound":                                  checkupStatus.Results.PVCBound,
 			"status.result.storageProfilesWithEmptyClaimPropertySets": checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
 			"status.result.storageProfilesWithSpecClaimPropertySets":  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
 			"status.result.storageWithRWX":                            checkupStatus.Results.StorageWithRWX,
@@ -106,7 +108,6 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 		}
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
 	})
-
 	t.Run("on checkup failure", func(t *testing.T) {
 		fakeClient := fake.NewSimpleClientset(newConfigMap())
 		testReporter := reporter.New(fakeClient, testNamespace, testConfigMapName)
@@ -125,7 +126,6 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.startTimestamp":      timestamp(checkupStatus.StartTimestamp),
 			"status.completionTimestamp": timestamp(checkupStatus.CompletionTimestamp),
 		}
-
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
 	})
 
