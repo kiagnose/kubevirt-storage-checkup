@@ -421,7 +421,7 @@ func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string
 			Storage: &cdiv1.StorageSpec{
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse("20Mi"),
+						corev1.ResourceStorage: resource.MustParse("10Mi"),
 					},
 				},
 			},
@@ -456,6 +456,7 @@ func (c *Checkup) waitForPVCBound(ctx context.Context, result, errStr *string) {
 
 	log.Printf("Waiting for PVC %q bound", pvcName)
 	if err := wait.PollImmediateWithContext(ctx, pollInterval, time.Minute, conditionFn); err != nil {
+		log.Printf("PVC %q failed to bound", pvcName)
 		appendSep(result, ErrPvcNotBound)
 		appendSep(errStr, ErrPvcNotBound)
 		return
