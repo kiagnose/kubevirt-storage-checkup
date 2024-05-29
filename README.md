@@ -64,7 +64,7 @@ kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 |status.startTimestamp|Checkup start timestamp|RFC 3339|
 |status.completionTimestamp|Checkup completion timestamp|RFC 3339|
 |status.result.defaultStorageClass|Indicates whether there is a default storage class||
-|status.result.pvcBound|PVC created and bound by the provisioner||
+|status.result.pvcBound|PVC of 10Mi created and bound by the provisioner||
 |status.result.storageProfilesWithEmptyClaimPropertySets|StorageProfiles with empty claimPropertySets (unknown provisioners)||
 |status.result.storageProfilesWithSpecClaimPropertySets|StorageProfiles with spec-overriden claimPropertySets||
 |status.result.storageWithRWX|Storage with RWX access mode||
