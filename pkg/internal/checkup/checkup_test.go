@@ -46,6 +46,7 @@ import (
 
 const (
 	testNamespace = "target-ns"
+	testNode      = "test-node"
 )
 
 var (
@@ -145,6 +146,11 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			clientConfig:    clientConfig{failMigration: true},
 			expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: migration failed"},
 			expectedErr:     "migration failed",
+		},
+		"skipMigrationOnSingleNode": {
+			clientConfig:    clientConfig{singleNode: true},
+			expectedResults: map[string]string{reporter.VMLiveMigrationKey: "Skip check - single node"},
+			expectedErr:     "",
 		},
 	}
 
@@ -247,6 +253,7 @@ type clientConfig struct {
 	expectNoVMI                   bool
 	cloneFallback                 bool
 	failMigration                 bool
+	singleNode                    bool
 }
 
 type clientStub struct {
@@ -401,6 +408,23 @@ func (cs *clientStub) DeleteDataVolume(ctx context.Context, namespace, name stri
 
 func (cs *clientStub) DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error {
 	return nil
+}
+
+func (cs *clientStub) ListNodes(ctx context.Context) (*corev1.NodeList, error) {
+	nodeList := &corev1.NodeList{}
+	itemCount := 2
+	if cs.singleNode {
+		itemCount = 1
+	}
+	for i := 0; i < itemCount; i++ {
+		nodeList.Items = append(nodeList.Items, corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("node-%d", i),
+			},
+		})
+	}
+
+	return nodeList, nil
 }
 
 func (cs *clientStub) ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error) {
