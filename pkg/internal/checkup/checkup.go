@@ -59,6 +59,7 @@ type kubeVirtStorageClient interface {
 	CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error)
 	DeleteDataVolume(ctx context.Context, namespace, name string) error
 	DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error
+	ListNodes(ctx context.Context) (*corev1.NodeList, error)
 	ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error)
 	ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error)
 	ListStorageProfiles(ctx context.Context) (*cdiv1.StorageProfileList, error)
@@ -93,6 +94,7 @@ const (
 	ErrGoldenImageNoDataSource     = "dataSource has no PVC or Snapshot source"
 	MessageSkipNoGoldenImage       = "Skip check - no golden image PVC or Snapshot"
 	MessageSkipNoVMI               = "Skip check - no VMI"
+	MessageSkipSingleNode          = "Skip check - single node"
 
 	pollInterval = 5 * time.Second
 )
@@ -820,6 +822,16 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 	if c.vmUnderTest == nil {
 		log.Print(MessageSkipNoVMI)
 		c.results.VMLiveMigration = MessageSkipNoVMI
+		return nil
+	}
+
+	nodes, err := c.client.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+	if len(nodes.Items) == 1 {
+		log.Print(MessageSkipSingleNode)
+		c.results.VMLiveMigration = MessageSkipSingleNode
 		return nil
 	}
 
