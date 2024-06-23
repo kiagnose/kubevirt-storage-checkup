@@ -469,12 +469,7 @@ func (c *Checkup) waitForPVCBound(ctx context.Context, result, errStr *string) {
 	appendSep(result, res)
 }
 
-// FIXME: check default SC hasSmartCloneAndRWX, and if not report the problem
-func (c *Checkup) hasSmartCloneAndRWX(ctx context.Context, sp *cdiv1.StorageProfile, vscs *snapshotv1.VolumeSnapshotClassList) bool {
-	if !hasRWX(sp.Status.ClaimPropertySets) {
-		return false
-	}
-
+func (c *Checkup) hasSmartClone(ctx context.Context, sp *cdiv1.StorageProfile, vscs *snapshotv1.VolumeSnapshotClassList) bool {
 	strategy := sp.Status.CloneStrategy
 	provisioner := sp.Status.Provisioner
 
@@ -497,7 +492,10 @@ func (c *Checkup) hasSmartCloneAndRWX(ctx context.Context, sp *cdiv1.StorageProf
 
 func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StorageProfileList,
 	vscs *snapshotv1.VolumeSnapshotClassList, errStr *string) {
-	var spWithEmptyClaimPropertySets, spWithSpecClaimPropertySets, spWithRWX string
+	spWithEmptyClaimPropertySets := ""
+	spWithSpecClaimPropertySets := ""
+	spWithSmartClone := ""
+	spWithRWX := ""
 
 	log.Print("checkStorageProfiles")
 	for i := range sps.Items {
@@ -508,7 +506,9 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 		}
 
 		sc := sp.Status.StorageClass
-		if sc != nil && c.hasSmartCloneAndRWX(ctx, sp, vscs) {
+		hasSmartClone := c.hasSmartClone(ctx, sp, vscs)
+		hasRWX := hasRWX(sp.Status.ClaimPropertySets)
+		if sc != nil && hasSmartClone && hasRWX {
 			c.goldenImageScs = append(c.goldenImageScs, *sc)
 		}
 
@@ -518,7 +518,10 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 		if len(sp.Spec.ClaimPropertySets) != 0 {
 			appendSep(&spWithSpecClaimPropertySets, sp.Name)
 		}
-		if hasRWX(sp.Status.ClaimPropertySets) {
+		if hasSmartClone {
+			appendSep(&spWithSmartClone, sp.Name)
+		}
+		if hasRWX {
 			appendSep(&spWithRWX, sp.Name)
 		}
 	}
@@ -529,6 +532,9 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 	}
 	if spWithSpecClaimPropertySets != "" {
 		c.results.StorageProfilesWithSpecClaimPropertySets = spWithSpecClaimPropertySets
+	}
+	if spWithSmartClone != "" {
+		c.results.StorageWithSmartClone = spWithSmartClone
 	}
 	if spWithRWX != "" {
 		c.results.StorageWithRWX = spWithRWX

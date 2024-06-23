@@ -116,9 +116,10 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 			expectedErr: checkup.ErrEmptyClaimPropertySets,
 		},
 		"noVolumeSnapshotClasses": {
-			clientConfig:    clientConfig{noVolumeSnapshotClasses: true},
-			expectedResults: map[string]string{reporter.StorageMissingVolumeSnapshotClassKey: testScName},
-			expectedErr:     "",
+			clientConfig: clientConfig{noVolumeSnapshotClasses: true},
+			expectedResults: map[string]string{reporter.StorageMissingVolumeSnapshotClassKey: testScName,
+				reporter.StorageWithSmartCloneKey: ""},
+			expectedErr: "",
 		},
 		"dataSourceNotReady": {
 			clientConfig: clientConfig{dataSourceNotReady: true, expectNoVMI: true},
@@ -225,6 +226,7 @@ func successfulRunResults(vmiUnderTestName string) map[string]string {
 		reporter.PVCBoundKey:                                  "PVC \"checkup-pvc\" bound",
 		reporter.StorageProfilesWithEmptyClaimPropertySetsKey: "",
 		reporter.StorageProfilesWithSpecClaimPropertySetsKey:  "",
+		reporter.StorageWithSmartCloneKey:                     testScName,
 		reporter.StorageWithRWXKey:                            testScName,
 		reporter.StorageMissingVolumeSnapshotClassKey:         "",
 		reporter.GoldenImagesNotUpToDateKey:                   "",

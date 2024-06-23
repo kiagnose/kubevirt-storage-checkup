@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	kconfigmap "github.com/kiagnose/kiagnose/kiagnose/configmap"
+	kstatus "github.com/kiagnose/kiagnose/kiagnose/status"
 
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/reporter"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
@@ -58,9 +59,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 	t.Run("on checkup success", func(t *testing.T) {
 		fakeClient := fake.NewSimpleClientset(newConfigMap())
 		testReporter := reporter.New(fakeClient, testNamespace, testConfigMapName)
-
-		var checkupStatus status.Status
-		checkupStatus.StartTimestamp = time.Now()
+		checkupStatus := status.Status{Status: kstatus.Status{StartTimestamp: time.Now()}}
 		assert.NoError(t, testReporter.Report(checkupStatus))
 		checkupStatus.FailureReason = []string{}
 		checkupStatus.CompletionTimestamp = time.Now()
@@ -71,6 +70,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			PVCBound:            "ok",
 			StorageProfilesWithEmptyClaimPropertySets: "sc1, sc2",
 			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
+			StorageWithSmartClone:                     "sc4, sc5",
 			StorageWithRWX:                            "sc5, sc6",
 			StorageMissingVolumeSnapshotClass:         "sc7, sc8",
 			GoldenImagesNotUpToDate:                   "dic1, dic2",
@@ -95,6 +95,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.result.pvcBound":                                  checkupStatus.Results.PVCBound,
 			"status.result.storageProfilesWithEmptyClaimPropertySets": checkupStatus.Results.StorageProfilesWithEmptyClaimPropertySets,
 			"status.result.storageProfilesWithSpecClaimPropertySets":  checkupStatus.Results.StorageProfilesWithSpecClaimPropertySets,
+			"status.result.storageWithSmartClone":                     checkupStatus.Results.StorageWithSmartClone,
 			"status.result.storageWithRWX":                            checkupStatus.Results.StorageWithRWX,
 			"status.result.storageMissingVolumeSnapshotClass":         checkupStatus.Results.StorageMissingVolumeSnapshotClass,
 			"status.result.goldenImagesNotUpToDate":                   checkupStatus.Results.GoldenImagesNotUpToDate,

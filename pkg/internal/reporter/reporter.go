@@ -34,6 +34,7 @@ const (
 	PVCBoundKey                                  = "pvcBound"
 	StorageProfilesWithEmptyClaimPropertySetsKey = "storageProfilesWithEmptyClaimPropertySets"
 	StorageProfilesWithSpecClaimPropertySetsKey  = "storageProfilesWithSpecClaimPropertySets"
+	StorageWithSmartCloneKey                     = "storageWithSmartClone"
 	StorageWithRWXKey                            = "storageWithRWX"
 	StorageMissingVolumeSnapshotClassKey         = "storageMissingVolumeSnapshotClass"
 	GoldenImagesNotUpToDateKey                   = "goldenImagesNotUpToDate"
@@ -81,16 +82,17 @@ func FormatResults(checkupResults status.Results) map[string]string {
 		PVCBoundKey:            checkupResults.PVCBound,
 		StorageProfilesWithEmptyClaimPropertySetsKey: checkupResults.StorageProfilesWithEmptyClaimPropertySets,
 		StorageProfilesWithSpecClaimPropertySetsKey:  checkupResults.StorageProfilesWithSpecClaimPropertySets,
-		StorageWithRWXKey:                    checkupResults.StorageWithRWX,
-		StorageMissingVolumeSnapshotClassKey: checkupResults.StorageMissingVolumeSnapshotClass,
-		GoldenImagesNotUpToDateKey:           checkupResults.GoldenImagesNotUpToDate,
-		GoldenImagesNoDataSourceKey:          checkupResults.GoldenImagesNoDataSource,
-		VMsWithNonVirtRbdStorageClassKey:     checkupResults.VMsWithNonVirtRbdStorageClass,
-		VMsWithUnsetEfsStorageClassKey:       checkupResults.VMsWithUnsetEfsStorageClass,
-		VMBootFromGoldenImageKey:             checkupResults.VMBootFromGoldenImage,
-		VMVolumeCloneKey:                     checkupResults.VMVolumeClone,
-		VMLiveMigrationKey:                   checkupResults.VMLiveMigration,
-		VMHotplugVolumeKey:                   checkupResults.VMHotplugVolume,
+		StorageWithSmartCloneKey:                     checkupResults.StorageWithSmartClone,
+		StorageWithRWXKey:                            checkupResults.StorageWithRWX,
+		StorageMissingVolumeSnapshotClassKey:         checkupResults.StorageMissingVolumeSnapshotClass,
+		GoldenImagesNotUpToDateKey:                   checkupResults.GoldenImagesNotUpToDate,
+		GoldenImagesNoDataSourceKey:                  checkupResults.GoldenImagesNoDataSource,
+		VMsWithNonVirtRbdStorageClassKey:             checkupResults.VMsWithNonVirtRbdStorageClass,
+		VMsWithUnsetEfsStorageClassKey:               checkupResults.VMsWithUnsetEfsStorageClass,
+		VMBootFromGoldenImageKey:                     checkupResults.VMBootFromGoldenImage,
+		VMVolumeCloneKey:                             checkupResults.VMVolumeClone,
+		VMLiveMigrationKey:                           checkupResults.VMLiveMigration,
+		VMHotplugVolumeKey:                           checkupResults.VMHotplugVolume,
 	}
 
 	return formattedResults
