@@ -30,6 +30,7 @@ type Results struct {
 	PVCBound                                  string
 	StorageProfilesWithEmptyClaimPropertySets string
 	StorageProfilesWithSpecClaimPropertySets  string
+	StorageWithSmartClone                     string
 	StorageWithRWX                            string
 	StorageMissingVolumeSnapshotClass         string
 	GoldenImagesNotUpToDate                   string

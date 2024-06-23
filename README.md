@@ -67,8 +67,9 @@ kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 |status.result.pvcBound|PVC of 10Mi created and bound by the provisioner||
 |status.result.storageProfilesWithEmptyClaimPropertySets|StorageProfiles with empty claimPropertySets (unknown provisioners)||
 |status.result.storageProfilesWithSpecClaimPropertySets|StorageProfiles with spec-overriden claimPropertySets||
-|status.result.storageWithRWX|Storage with RWX access mode||
-|status.result.storageMissingVolumeSnapshotClass|Storage using snapshot-based clone but missing VolumeSnapshotClass||
+|status.result.storageWithSmartClone|StorageProfiles with smart clone support (CSI/snapshot)||
+|status.result.storageWithRWX|StorageProfiles with ReadWriteMany access mode||
+|status.result.storageMissingVolumeSnapshotClass|StorageProfiles using snapshot-based clone but missing VolumeSnapshotClass||
 |status.result.goldenImagesNotUpToDate|Golden images whose DataImportCron is not up to date or DataSource is not ready||
 |status.result.goldenImagesNoDataSource|Golden images with no DataSource||
 |status.result.vmsWithNonVirtRbdStorageClass|VMs using the plain RBD storageclass when the virtualization storageclass exists||
