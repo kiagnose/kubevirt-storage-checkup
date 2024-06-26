@@ -30,9 +30,9 @@ type Results struct {
 	PVCBound                                  string
 	StorageProfilesWithEmptyClaimPropertySets string
 	StorageProfilesWithSpecClaimPropertySets  string
-	StorageWithSmartClone                     string
-	StorageWithRWX                            string
-	StorageMissingVolumeSnapshotClass         string
+	StorageProfilesWithSmartClone             string
+	StorageProfilesWithRWX                    string
+	StorageProfileMissingVolumeSnapshotClass  string
 	GoldenImagesNotUpToDate                   string
 	GoldenImagesNoDataSource                  string
 	VMsWithNonVirtRbdStorageClass             string

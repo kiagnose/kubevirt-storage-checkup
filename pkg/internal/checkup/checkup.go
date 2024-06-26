@@ -534,10 +534,10 @@ func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StoragePr
 		c.results.StorageProfilesWithSpecClaimPropertySets = spWithSpecClaimPropertySets
 	}
 	if spWithSmartClone != "" {
-		c.results.StorageWithSmartClone = spWithSmartClone
+		c.results.StorageProfilesWithSmartClone = spWithSmartClone
 	}
 	if spWithRWX != "" {
-		c.results.StorageWithRWX = spWithRWX
+		c.results.StorageProfilesWithRWX = spWithRWX
 	}
 }
 
@@ -569,7 +569,7 @@ func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs
 		}
 	}
 	if spNames != "" {
-		c.results.StorageMissingVolumeSnapshotClass = spNames
+		c.results.StorageProfileMissingVolumeSnapshotClass = spNames
 		// FIXME: not sure the checkup should fail on this one
 		// appendSep(errStr, errMissingVolumeSnapshotClass)
 	}

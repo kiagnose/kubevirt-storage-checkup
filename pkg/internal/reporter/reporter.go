@@ -34,9 +34,9 @@ const (
 	PVCBoundKey                                  = "pvcBound"
 	StorageProfilesWithEmptyClaimPropertySetsKey = "storageProfilesWithEmptyClaimPropertySets"
 	StorageProfilesWithSpecClaimPropertySetsKey  = "storageProfilesWithSpecClaimPropertySets"
-	StorageWithSmartCloneKey                     = "storageWithSmartClone"
-	StorageWithRWXKey                            = "storageWithRWX"
-	StorageMissingVolumeSnapshotClassKey         = "storageMissingVolumeSnapshotClass"
+	StorageProfilesWithSmartCloneKey             = "storageProfilesWithSmartClone"
+	StorageProfilesWithRWXKey                    = "storageProfilesWithRWX"
+	StorageProfileMissingVolumeSnapshotClassKey  = "storageProfileMissingVolumeSnapshotClass"
 	GoldenImagesNotUpToDateKey                   = "goldenImagesNotUpToDate"
 	GoldenImagesNoDataSourceKey                  = "goldenImagesNoDataSource"
 	VMsWithNonVirtRbdStorageClassKey             = "vmsWithNonVirtRbdStorageClass"
@@ -82,9 +82,9 @@ func FormatResults(checkupResults status.Results) map[string]string {
 		PVCBoundKey:            checkupResults.PVCBound,
 		StorageProfilesWithEmptyClaimPropertySetsKey: checkupResults.StorageProfilesWithEmptyClaimPropertySets,
 		StorageProfilesWithSpecClaimPropertySetsKey:  checkupResults.StorageProfilesWithSpecClaimPropertySets,
-		StorageWithSmartCloneKey:                     checkupResults.StorageWithSmartClone,
-		StorageWithRWXKey:                            checkupResults.StorageWithRWX,
-		StorageMissingVolumeSnapshotClassKey:         checkupResults.StorageMissingVolumeSnapshotClass,
+		StorageProfilesWithSmartCloneKey:             checkupResults.StorageProfilesWithSmartClone,
+		StorageProfilesWithRWXKey:                    checkupResults.StorageProfilesWithRWX,
+		StorageProfileMissingVolumeSnapshotClassKey:  checkupResults.StorageProfileMissingVolumeSnapshotClass,
 		GoldenImagesNotUpToDateKey:                   checkupResults.GoldenImagesNotUpToDate,
 		GoldenImagesNoDataSourceKey:                  checkupResults.GoldenImagesNoDataSource,
 		VMsWithNonVirtRbdStorageClassKey:             checkupResults.VMsWithNonVirtRbdStorageClass,
