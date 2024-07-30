@@ -22,6 +22,7 @@ package config
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	kconfig "github.com/kiagnose/kiagnose/kiagnose/config"
@@ -34,14 +35,17 @@ import (
 const (
 	StorageClassParamName = "storageClass"
 	VMITimeoutParamName   = "vmiTimeout"
+	NumOfVMsParamName     = "numOfVMs"
 )
 
 const (
 	VMITimeoutDefault = 3 * time.Minute
+	NumOfVMsDefault   = 10
 )
 
 var (
 	ErrInvalidVMITimeout = errors.New("invalid VMI timeout")
+	ErrInvalidNumOfVMs   = errors.New("invalid number of VMIs")
 )
 
 type Config struct {
@@ -49,6 +53,7 @@ type Config struct {
 	PodUID       string
 	StorageClass string
 	VMITimeout   time.Duration
+	NumOfVMs     int
 }
 
 func New(baseConfig kconfig.Config) (Config, error) {
@@ -56,6 +61,7 @@ func New(baseConfig kconfig.Config) (Config, error) {
 		PodName:    baseConfig.PodName,
 		PodUID:     baseConfig.PodUID,
 		VMITimeout: VMITimeoutDefault,
+		NumOfVMs:   NumOfVMsDefault,
 	}
 
 	return setOptionalParams(baseConfig, newConfig)
@@ -68,11 +74,19 @@ func setOptionalParams(baseConfig kconfig.Config, newConfig Config) (Config, err
 		newConfig.StorageClass = sc
 	}
 
-	if rawVal := baseConfig.Params[VMITimeoutParamName]; rawVal != "" {
+	if rawVal, exists := baseConfig.Params[VMITimeoutParamName]; exists && rawVal != "" {
 		newConfig.VMITimeout, err = time.ParseDuration(rawVal)
 		if err != nil {
 			return Config{}, ErrInvalidVMITimeout
 		}
+	}
+
+	if rawVal, exists := baseConfig.Params[NumOfVMsParamName]; exists && rawVal != "" {
+		numOfVMs, err := strconv.Atoi(rawVal)
+		if err != nil || numOfVMs < 1 || numOfVMs > 100 {
+			return Config{}, ErrInvalidNumOfVMs
+		}
+		newConfig.NumOfVMs = numOfVMs
 	}
 
 	return newConfig, nil

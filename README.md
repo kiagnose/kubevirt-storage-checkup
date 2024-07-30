@@ -34,6 +34,7 @@ Cluster admin should create the following cluster-reader permissions for dedicat
 |spec.timeout|How much time before the checkup will try to close itself|False|Default is 10m|
 |spec.param.storageClass|Optional storage class to be used instead of the default one|False||
 |spec.param.vmiTimeout|Optional timeout for VMI operations|False|Default is 3m|
+|spec.param.numOfVMs|Optional number of concurrent VMs to boot|False|Default is 10|
 
 ### Example
 
@@ -63,6 +64,8 @@ kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 |status.failureReason|Failure reason in case of a failure||
 |status.startTimestamp|Checkup start timestamp|RFC 3339|
 |status.completionTimestamp|Checkup completion timestamp|RFC 3339|
+|status.result.cnvVersion|OpenShift Virtualization version||
+|status.result.ocpVersion|OpenShift Container Platform cluster version||
 |status.result.defaultStorageClass|Indicates whether there is a default storage class||
 |status.result.pvcBound|PVC of 10Mi created and bound by the provisioner||
 |status.result.storageProfilesWithEmptyClaimPropertySets|StorageProfiles with empty claimPropertySets (unknown provisioners)||
@@ -78,3 +81,4 @@ kubectl get configmap storage-checkup-config -n <target-namespace> -o yaml
 |status.result.vmVolumeClone|VM volume clone type used (efficient or host-assisted) and fallback reason||
 |status.result.vmLiveMigration|VM live-migration||
 |status.result.vmHotplugVolume|VM volume hotplug and unplug||
+|status.result.concurrentVMBoot|Concurrent VM boot from a golden image||
