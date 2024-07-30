@@ -20,6 +20,8 @@
 package checkup
 
 import (
+	"fmt"
+
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/vmi"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 
@@ -32,17 +34,25 @@ import (
 
 const (
 	guestMemory                   = "2Gi"
-	rootDiskName                  = "rootdisk"
 	terminationGracePeriodSeconds = 0
 )
 
 func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
-	checkupConfig config.Config) *kvcorev1.VirtualMachine {
+	checkupConfig config.Config, addBlankDataVolume bool) *kvcorev1.VirtualMachine {
+	dvName := getVMDvName(name)
 	optionsToApply := []vmi.Option{
-		vmi.WithDataVolume(rootDiskName, pvc, snap, checkupConfig.StorageClass),
+		vmi.WithDataVolume(dvName, pvc, snap, checkupConfig.StorageClass),
 		vmi.WithMemory(guestMemory),
 		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
 		vmi.WithOwnerReference(checkupConfig.PodName, checkupConfig.PodUID),
 	}
+	if addBlankDataVolume {
+		blankDvName := fmt.Sprintf("%s-blank", dvName)
+		optionsToApply = append(optionsToApply, vmi.WithDataVolume(blankDvName, nil, nil, checkupConfig.StorageClass))
+	}
 	return vmi.NewVM(name, optionsToApply...)
+}
+
+func getVMDvName(vmName string) string {
+	return fmt.Sprintf("%s-dv", vmName)
 }

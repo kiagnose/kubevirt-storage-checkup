@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -36,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/wait"
 
-	vmispec "github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/vmi"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
 
@@ -92,6 +92,8 @@ const (
 	ErrVMsWithUnsetEfsStorageClass = "there are VMs using an EFS storageclass where the gid and uid are not set in the storageclass"
 	ErrGoldenImagesNotUpToDate     = "there are golden images whose DataImportCron is not up to date or DataSource is not ready"
 	ErrGoldenImageNoDataSource     = "dataSource has no PVC or Snapshot source"
+	ErrBootFailedOnSomeVMs         = "some of the VMs failed to complete boot on time"
+	MessageBootCompletedOnAllVMs   = "Boot completed on all VMs on time"
 	MessageSkipNoGoldenImage       = "Skip check - no golden image PVC or Snapshot"
 	MessageSkipNoVMI               = "Skip check - no VMI"
 	MessageSkipSingleNode          = "Skip check - single node"
@@ -181,13 +183,17 @@ func (c *Checkup) Run(ctx context.Context) error {
 		return err
 	}
 
-	if err := c.checkVMICreation(ctx, &errStr); err != nil {
+	if err := c.checkVMIBoot(ctx, &errStr); err != nil {
 		return err
 	}
 	if err := c.checkVMILiveMigration(ctx, &errStr); err != nil {
 		return err
 	}
 	if err := c.checkVMIHotplugVolume(ctx, &errStr); err != nil {
+		return err
+	}
+
+	if err := c.checkConcurrentVMIBoot(ctx, &errStr); err != nil {
 		return err
 	}
 
@@ -774,37 +780,26 @@ func (c *Checkup) Results() status.Results {
 	return c.results
 }
 
-func (c *Checkup) checkVMICreation(ctx context.Context, errStr *string) error {
-	const randomStringLen = 5
-
-	log.Print("checkVMICreation")
+func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
+	log.Print("checkVMIBoot")
 	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
 		log.Print(MessageSkipNoGoldenImage)
 		c.results.VMBootFromGoldenImage = MessageSkipNoGoldenImage
 		return nil
 	}
 
-	vmName := fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
-	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig)
+	vmName := uniqueVMName()
+	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, false)
 	log.Printf("Creating VM %q", vmName)
 	if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, c.vmUnderTest); err != nil {
 		return fmt.Errorf("failed to create VM: %w", err)
 	}
 
-	if err := c.waitForVMIStatus(ctx, "successfully booted", &c.results.VMBootFromGoldenImage, errStr,
-		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
-			for i := range vmi.Status.Conditions {
-				condition := vmi.Status.Conditions[i]
-				if condition.Type == kvcorev1.VirtualMachineInstanceReady && condition.Status == corev1.ConditionTrue {
-					return true, nil
-				}
-			}
-			return false, nil
-		}); err != nil {
+	if err := c.waitForVMIBoot(ctx, vmName, &c.results.VMBootFromGoldenImage, errStr); err != nil {
 		return err
 	}
 
-	pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, vmispec.OSDataVolumName)
+	pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, getVMDvName(vmName))
 	if err != nil {
 		return err
 	}
@@ -842,7 +837,8 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 		return nil
 	}
 
-	vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, c.vmUnderTest.Name)
+	vmName := c.vmUnderTest.Name
+	vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, vmName)
 	if err != nil {
 		return err
 	}
@@ -864,7 +860,7 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 			Name: "vmim",
 		},
 		Spec: kvcorev1.VirtualMachineInstanceMigrationSpec{
-			VMIName: c.vmUnderTest.Name,
+			VMIName: vmName,
 		},
 	}
 
@@ -872,7 +868,7 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 		return fmt.Errorf("failed to create VMI LiveMigration: %w", err)
 	}
 
-	if err := c.waitForVMIStatus(ctx, "migration completed", &c.results.VMLiveMigration, errStr,
+	if err := c.waitForVMIStatus(ctx, vmName, "migration completed", &c.results.VMLiveMigration, errStr,
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
 			if ms := vmi.Status.MigrationState; ms != nil {
 				if ms.Completed {
@@ -933,11 +929,12 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 		},
 	}
 
-	if err := c.client.AddVirtualMachineInstanceVolume(ctx, c.namespace, c.vmUnderTest.Name, addVolumeOpts); err != nil {
+	vmName := c.vmUnderTest.Name
+	if err := c.client.AddVirtualMachineInstanceVolume(ctx, c.namespace, vmName, addVolumeOpts); err != nil {
 		return err
 	}
 
-	if err := c.waitForVMIStatus(ctx, "hotplug volume ready", &c.results.VMHotplugVolume, errStr,
+	if err := c.waitForVMIStatus(ctx, vmName, "hotplug volume ready", &c.results.VMHotplugVolume, errStr,
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
 			for i := range vmi.Status.VolumeStatus {
 				vs := vmi.Status.VolumeStatus[i]
@@ -955,11 +952,11 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 		Name: hotplugVolumeName,
 	}
 
-	if err := c.client.RemoveVirtualMachineInstanceVolume(ctx, c.namespace, c.vmUnderTest.Name, removeVolumeOpts); err != nil {
+	if err := c.client.RemoveVirtualMachineInstanceVolume(ctx, c.namespace, vmName, removeVolumeOpts); err != nil {
 		return err
 	}
 
-	if err := c.waitForVMIStatus(ctx, "hotplug volume removed", &c.results.VMHotplugVolume, errStr,
+	if err := c.waitForVMIStatus(ctx, vmName, "hotplug volume removed", &c.results.VMHotplugVolume, errStr,
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
 			for i := range vmi.Status.VolumeStatus {
 				vs := vmi.Status.VolumeStatus[i]
@@ -975,11 +972,82 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 	return nil
 }
 
+func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) error {
+	numOfVMs := c.checkupConfig.NumOfVMs
+	log.Printf("checkConcurrentVMIBoot numOfVMs:%d", numOfVMs)
+
+	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
+		log.Print(MessageSkipNoGoldenImage)
+		c.results.ConcurrentVMBoot = MessageSkipNoGoldenImage
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	isBootOk := true
+
+	for i := 0; i < numOfVMs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			vmName := uniqueVMName()
+			log.Printf("Creating VM %q", vmName)
+			vm := newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, true)
+			if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, vm); err != nil {
+				log.Printf("failed to create VM %q: %s", vmName, err)
+				isBootOk = false
+				return
+			}
+
+			defer func() {
+				if err := c.client.DeleteVirtualMachine(ctx, c.namespace, vmName); err != nil {
+					log.Printf("failed to delete VM %q: %s", vmName, err)
+				}
+			}()
+
+			var result, errs string
+			if err := c.waitForVMIBoot(ctx, vmName, &result, &errs); err != nil || errs != "" {
+				log.Printf("failed waiting for VM boot %q", vmName)
+				isBootOk = false
+			}
+		}()
+	}
+
+	wg.Wait()
+	if !isBootOk {
+		log.Print(ErrBootFailedOnSomeVMs)
+		c.results.ConcurrentVMBoot = ErrBootFailedOnSomeVMs
+		appendSep(errStr, ErrBootFailedOnSomeVMs)
+		return nil
+	}
+
+	log.Print(MessageBootCompletedOnAllVMs)
+	c.results.ConcurrentVMBoot = MessageBootCompletedOnAllVMs
+
+	return nil
+}
+
+func (c *Checkup) waitForVMIBoot(ctx context.Context, vmName string, result, errStr *string) error {
+	return c.waitForVMIStatus(ctx, vmName, "successfully booted", result, errStr,
+		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
+			for i := range vmi.Status.Conditions {
+				condition := vmi.Status.Conditions[i]
+				if condition.Type == kvcorev1.VirtualMachineInstanceReady && condition.Status == corev1.ConditionTrue {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+}
+
+func uniqueVMName() string {
+	const randomStringLen = 5
+	return fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
+}
+
 type checkVMIStatusFn func(*kvcorev1.VirtualMachineInstance) (done bool, err error)
 
-func (c *Checkup) waitForVMIStatus(ctx context.Context, checkMsg string, result, errStr *string, checkVMIStatus checkVMIStatusFn) error {
-	vmName := c.vmUnderTest.Name
-
+func (c *Checkup) waitForVMIStatus(ctx context.Context, vmName, checkMsg string, result, errStr *string, checkVMIStatus checkVMIStatusFn) error {
 	conditionFn := func(ctx context.Context) (bool, error) {
 		vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, vmName)
 		if err != nil {

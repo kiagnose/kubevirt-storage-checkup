@@ -124,13 +124,17 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 		"dataSourceNotReady": {
 			clientConfig: clientConfig{dataSourceNotReady: true, expectNoVMI: true},
 			expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC,
-				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
+				reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
+			},
 			expectedErr: checkup.ErrGoldenImagesNotUpToDate,
 		},
 		"dicNoDataSource": {
 			clientConfig: clientConfig{dicNoDataSource: true, expectNoVMI: true},
 			expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC,
-				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage},
+				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
+				reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
+			},
 			expectedErr: checkup.ErrGoldenImageNoDataSource,
 		},
 		"vmisWithUnsetEfsSC": {
@@ -238,6 +242,7 @@ func successfulRunResults(vmiUnderTestName string) map[string]string {
 		reporter.VMLiveMigrationKey:                           fmt.Sprintf("VMI %q migration completed", vmiUnderTestName),
 		reporter.VMHotplugVolumeKey: fmt.Sprintf("VMI %q hotplug volume ready\nVMI %q hotplug volume removed",
 			vmiUnderTestName, vmiUnderTestName),
+		reporter.ConcurrentVMBootKey: "Boot completed on all VMs on time",
 	}
 }
 

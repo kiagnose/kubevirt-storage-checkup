@@ -30,12 +30,6 @@ import (
 	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
 )
 
-const (
-	OSDataVolumName = "os-dv"
-
-	Disable = "disable"
-)
-
 type Option func(vm *kvcorev1.VirtualMachine)
 
 func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
@@ -60,11 +54,11 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	return newVM
 }
 
-func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot, storageClass string) Option {
+func WithDataVolume(dvName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot, storageClass string) Option {
 	return func(vm *kvcorev1.VirtualMachine) {
 		dvt := kvcorev1.DataVolumeTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: OSDataVolumName,
+				Name: dvName,
 			},
 			Spec: cdiv1.DataVolumeSpec{
 				Source:  &cdiv1.DataVolumeSource{},
@@ -82,6 +76,11 @@ func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *
 				Namespace: snap.Namespace,
 				Name:      snap.Name,
 			}
+		} else {
+			dvt.Spec.Source.Blank = &cdiv1.DataVolumeBlankImage{}
+			dvt.Spec.Storage.Resources.Requests = corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1G"),
+			}
 		}
 
 		if storageClass != "" {
@@ -93,10 +92,10 @@ func WithDataVolume(volumeName string, pvc *corev1.PersistentVolumeClaim, snap *
 		vm.Spec.DataVolumeTemplates = append(vm.Spec.DataVolumeTemplates, dvt)
 
 		newVolume := kvcorev1.Volume{
-			Name: volumeName,
+			Name: dvName,
 			VolumeSource: kvcorev1.VolumeSource{
 				DataVolume: &kvcorev1.DataVolumeSource{
-					Name: OSDataVolumName,
+					Name: dvName,
 				},
 			},
 		}

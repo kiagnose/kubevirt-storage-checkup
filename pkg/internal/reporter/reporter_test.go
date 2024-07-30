@@ -81,6 +81,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			VMVolumeClone:                             "snapshot",
 			VMLiveMigration:                           "success",
 			VMHotplugVolume:                           "fail",
+			ConcurrentVMBoot:                          "ok",
 		}
 		assert.NoError(t, testReporter.Report(checkupStatus))
 
@@ -106,6 +107,7 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 			"status.result.vmVolumeClone":                             checkupStatus.Results.VMVolumeClone,
 			"status.result.vmLiveMigration":                           checkupStatus.Results.VMLiveMigration,
 			"status.result.vmHotplugVolume":                           checkupStatus.Results.VMHotplugVolume,
+			"status.result.concurrentVMBoot":                          checkupStatus.Results.ConcurrentVMBoot,
 		}
 		assert.Equal(t, expectedReportData, getCheckupData(t, fakeClient, testNamespace, testConfigMapName))
 	})
