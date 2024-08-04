@@ -83,82 +83,82 @@ func TestCheckupShouldSucceed(t *testing.T) {
 	assert.Equal(t, expectedResults, actualResults)
 }
 
-func TestCheckupShouldReturnErrorWhen(t *testing.T) {
-	tests := map[string]struct {
-		clientConfig    clientConfig
-		expectedResults map[string]string
-		expectedErr     string
-	}{
-		"noStorageClasses": {
-			clientConfig:    clientConfig{noStorageClasses: true},
-			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
-			expectedErr:     checkup.ErrNoDefaultStorageClass,
+var tests = map[string]struct {
+	clientConfig    clientConfig
+	expectedResults map[string]string
+	expectedErr     string
+}{
+	"noStorageClasses": {
+		clientConfig:    clientConfig{noStorageClasses: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
+		expectedErr:     checkup.ErrNoDefaultStorageClass,
+	},
+	"noDefaultStorageClass": {
+		clientConfig:    clientConfig{noDefaultStorageClass: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
+		expectedErr:     checkup.ErrNoDefaultStorageClass,
+	},
+	"multipleDefaultStorageClasses": {
+		clientConfig:    clientConfig{multipleDefaultStorageClasses: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
+		expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
+	},
+	"failPvcBound": {
+		clientConfig:    clientConfig{failPvcBound: true},
+		expectedResults: map[string]string{reporter.PVCBoundKey: checkup.ErrPvcNotBound},
+		expectedErr:     checkup.ErrPvcNotBound,
+	},
+	"storageProfileIncomplete": {
+		clientConfig: clientConfig{spIncomplete: true},
+		expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName,
+			reporter.StorageProfilesWithSpecClaimPropertySetsKey: testScName, reporter.StorageProfilesWithRWXKey: ""},
+		expectedErr: checkup.ErrEmptyClaimPropertySets,
+	},
+	"noVolumeSnapshotClasses": {
+		clientConfig: clientConfig{noVolumeSnapshotClasses: true},
+		expectedResults: map[string]string{reporter.StorageProfileMissingVolumeSnapshotClassKey: testScName,
+			reporter.StorageProfilesWithSmartCloneKey: ""},
+		expectedErr: "",
+	},
+	"dataSourceNotReady": {
+		clientConfig: clientConfig{dataSourceNotReady: true, expectNoVMI: true},
+		expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC,
+			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
+			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
 		},
-		"noDefaultStorageClass": {
-			clientConfig:    clientConfig{noDefaultStorageClass: true},
-			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
-			expectedErr:     checkup.ErrNoDefaultStorageClass,
+		expectedErr: checkup.ErrGoldenImagesNotUpToDate,
+	},
+	"dicNoDataSource": {
+		clientConfig: clientConfig{dicNoDataSource: true, expectNoVMI: true},
+		expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC,
+			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
+			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
 		},
-		"multipleDefaultStorageClasses": {
-			clientConfig:    clientConfig{multipleDefaultStorageClasses: true},
-			expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
-			expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
-		},
-		"failPvcBound": {
-			clientConfig:    clientConfig{failPvcBound: true},
-			expectedResults: map[string]string{reporter.PVCBoundKey: checkup.ErrPvcNotBound},
-			expectedErr:     checkup.ErrPvcNotBound,
-		},
-		"storageProfileIncomplete": {
-			clientConfig: clientConfig{spIncomplete: true},
-			expectedResults: map[string]string{reporter.StorageProfilesWithEmptyClaimPropertySetsKey: testScName,
-				reporter.StorageProfilesWithSpecClaimPropertySetsKey: testScName, reporter.StorageProfilesWithRWXKey: ""},
-			expectedErr: checkup.ErrEmptyClaimPropertySets,
-		},
-		"noVolumeSnapshotClasses": {
-			clientConfig: clientConfig{noVolumeSnapshotClasses: true},
-			expectedResults: map[string]string{reporter.StorageProfileMissingVolumeSnapshotClassKey: testScName,
-				reporter.StorageProfilesWithSmartCloneKey: ""},
-			expectedErr: "",
-		},
-		"dataSourceNotReady": {
-			clientConfig: clientConfig{dataSourceNotReady: true, expectNoVMI: true},
-			expectedResults: map[string]string{reporter.GoldenImagesNotUpToDateKey: testNamespace + "/" + testDIC,
-				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
-				reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
-			},
-			expectedErr: checkup.ErrGoldenImagesNotUpToDate,
-		},
-		"dicNoDataSource": {
-			clientConfig: clientConfig{dicNoDataSource: true, expectNoVMI: true},
-			expectedResults: map[string]string{reporter.GoldenImagesNoDataSourceKey: testNamespace + "/" + testDIC,
-				reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoGoldenImage,
-				reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoGoldenImage,
-			},
-			expectedErr: checkup.ErrGoldenImageNoDataSource,
-		},
-		"vmisWithUnsetEfsSC": {
-			clientConfig:    clientConfig{unsetEfsStorageClass: true},
-			expectedResults: map[string]string{reporter.VMsWithUnsetEfsStorageClassKey: testNamespace + "/" + testVMIName},
-			expectedErr:     checkup.ErrVMsWithUnsetEfsStorageClass,
-		},
-		"dvCloneFallback": {
-			clientConfig:    clientConfig{cloneFallback: true},
-			expectedResults: map[string]string{reporter.VMVolumeCloneKey: "DV cloneType: \"host-assisted\"\nDV clone fallback reason: reason"},
-			expectedErr:     "DV clone fallback reason: reason",
-		},
-		"migrationFails": {
-			clientConfig:    clientConfig{failMigration: true},
-			expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: migration failed"},
-			expectedErr:     "migration failed",
-		},
-		"skipMigrationOnSingleNode": {
-			clientConfig:    clientConfig{singleNode: true},
-			expectedResults: map[string]string{reporter.VMLiveMigrationKey: "Skip check - single node"},
-			expectedErr:     "",
-		},
-	}
+		expectedErr: checkup.ErrGoldenImageNoDataSource,
+	},
+	"vmisWithUnsetEfsSC": {
+		clientConfig:    clientConfig{unsetEfsStorageClass: true},
+		expectedResults: map[string]string{reporter.VMsWithUnsetEfsStorageClassKey: testNamespace + "/" + testVMIName},
+		expectedErr:     checkup.ErrVMsWithUnsetEfsStorageClass,
+	},
+	"dvCloneFallback": {
+		clientConfig:    clientConfig{cloneFallback: true},
+		expectedResults: map[string]string{reporter.VMVolumeCloneKey: "DV cloneType: \"host-assisted\"\nDV clone fallback reason: reason"},
+		expectedErr:     "DV clone fallback reason: reason",
+	},
+	"migrationFails": {
+		clientConfig:    clientConfig{failMigration: true},
+		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: migration failed"},
+		expectedErr:     "migration failed",
+	},
+	"skipMigrationOnSingleNode": {
+		clientConfig:    clientConfig{singleNode: true},
+		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "Skip check - single node"},
+		expectedErr:     "",
+	},
+}
 
+func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			testClient := newClientStub(tc.clientConfig)
