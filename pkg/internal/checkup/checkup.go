@@ -1047,7 +1047,8 @@ func uniqueVMName() string {
 
 type checkVMIStatusFn func(*kvcorev1.VirtualMachineInstance) (done bool, err error)
 
-func (c *Checkup) waitForVMIStatus(ctx context.Context, vmName, checkMsg string, result, errStr *string, checkVMIStatus checkVMIStatusFn) error {
+func (c *Checkup) waitForVMIStatus(ctx context.Context, vmName, checkMsg string, result, errStr *string,
+	checkVMIStatus checkVMIStatusFn) error {
 	conditionFn := func(ctx context.Context) (bool, error) {
 		vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, vmName)
 		if err != nil {

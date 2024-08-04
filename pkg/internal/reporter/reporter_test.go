@@ -41,6 +41,8 @@ import (
 const (
 	testNamespace     = "target-ns"
 	testConfigMapName = "storage-checkup-config"
+	failureReason1    = "some reason"
+	failureReason2    = "some other reason"
 )
 
 func TestReportShouldSucceed(t *testing.T) {
@@ -51,11 +53,6 @@ func TestReportShouldSucceed(t *testing.T) {
 }
 
 func TestReportShouldSuccessfullyReportResults(t *testing.T) {
-	const (
-		failureReason1 = "some reason"
-		failureReason2 = "some other reason"
-	)
-
 	t.Run("on checkup success", func(t *testing.T) {
 		fakeClient := fake.NewSimpleClientset(newConfigMap())
 		testReporter := reporter.New(fakeClient, testNamespace, testConfigMapName)
