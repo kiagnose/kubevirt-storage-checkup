@@ -54,7 +54,9 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 	return newVM
 }
 
-func WithDataVolume(dvName string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot, storageClass string) Option {
+type DataVolumeOption func(*cdiv1.DataVolumeSpec)
+
+func WithDataVolume(dvName string, opts ...DataVolumeOption) Option {
 	return func(vm *kvcorev1.VirtualMachine) {
 		dvt := kvcorev1.DataVolumeTemplateSpec{
 			ObjectMeta: metav1.ObjectMeta{
@@ -66,27 +68,8 @@ func WithDataVolume(dvName string, pvc *corev1.PersistentVolumeClaim, snap *snap
 			},
 		}
 
-		if pvc != nil {
-			dvt.Spec.Source.PVC = &cdiv1.DataVolumeSourcePVC{
-				Namespace: pvc.Namespace,
-				Name:      pvc.Name,
-			}
-		} else if snap != nil {
-			dvt.Spec.Source.Snapshot = &cdiv1.DataVolumeSourceSnapshot{
-				Namespace: snap.Namespace,
-				Name:      snap.Name,
-			}
-		} else {
-			dvt.Spec.Source.Blank = &cdiv1.DataVolumeBlankImage{}
-			dvt.Spec.Storage.Resources.Requests = corev1.ResourceList{
-				corev1.ResourceStorage: resource.MustParse("1G"),
-			}
-		}
-
-		if storageClass != "" {
-			dvt.Spec.Storage.StorageClassName = &storageClass
-		} else if pvc != nil {
-			dvt.Spec.Storage.StorageClassName = pvc.Spec.StorageClassName
+		for _, f := range opts {
+			f(&dvt.Spec)
 		}
 
 		vm.Spec.DataVolumeTemplates = append(vm.Spec.DataVolumeTemplates, dvt)
@@ -100,6 +83,43 @@ func WithDataVolume(dvName string, pvc *corev1.PersistentVolumeClaim, snap *snap
 			},
 		}
 		vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, newVolume)
+	}
+}
+
+func WithDataVolumePvcSource(pvc *corev1.PersistentVolumeClaim) DataVolumeOption {
+	return func(dvSpec *cdiv1.DataVolumeSpec) {
+		dvSpec.Source.PVC = &cdiv1.DataVolumeSourcePVC{
+			Namespace: pvc.Namespace,
+			Name:      pvc.Name,
+		}
+
+		if dvSpec.Storage.StorageClassName == nil {
+			dvSpec.Storage.StorageClassName = pvc.Spec.StorageClassName
+		}
+	}
+}
+
+func WithDataVolumeSnapshotSource(snap *snapshotv1.VolumeSnapshot) DataVolumeOption {
+	return func(dvSpec *cdiv1.DataVolumeSpec) {
+		dvSpec.Source.Snapshot = &cdiv1.DataVolumeSourceSnapshot{
+			Namespace: snap.Namespace,
+			Name:      snap.Name,
+		}
+	}
+}
+
+func WithDataVolumeBlankSource() DataVolumeOption {
+	return func(dvSpec *cdiv1.DataVolumeSpec) {
+		dvSpec.Source.Blank = &cdiv1.DataVolumeBlankImage{}
+		dvSpec.Storage.Resources.Requests = corev1.ResourceList{
+			corev1.ResourceStorage: resource.MustParse("1Gi"),
+		}
+	}
+}
+
+func WithDataVolumeStorageClass(storageClass string) DataVolumeOption {
+	return func(dvSpec *cdiv1.DataVolumeSpec) {
+		dvSpec.Storage.StorageClassName = &storageClass
 	}
 }
 
