@@ -40,16 +40,34 @@ const (
 func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
 	checkupConfig config.Config, addBlankDataVolume bool) *kvcorev1.VirtualMachine {
 	dvName := getVMDvName(name)
+	dvOpts := []vmi.DataVolumeOption{}
+
+	if pvc != nil {
+		dvOpts = append(dvOpts, vmi.WithDataVolumePvcSource(pvc))
+	} else if snap != nil {
+		dvOpts = append(dvOpts, vmi.WithDataVolumeSnapshotSource(snap))
+	}
+
+	if checkupConfig.StorageClass != "" {
+		dvOpts = append(dvOpts, vmi.WithDataVolumeStorageClass(checkupConfig.StorageClass))
+	}
+
 	optionsToApply := []vmi.Option{
-		vmi.WithDataVolume(dvName, pvc, snap, checkupConfig.StorageClass),
+		vmi.WithDataVolume(dvName, dvOpts...),
 		vmi.WithMemory(guestMemory),
 		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
 		vmi.WithOwnerReference(checkupConfig.PodName, checkupConfig.PodUID),
 	}
+
 	if addBlankDataVolume {
 		blankDvName := fmt.Sprintf("%s-blank", dvName)
-		optionsToApply = append(optionsToApply, vmi.WithDataVolume(blankDvName, nil, nil, checkupConfig.StorageClass))
+		dvOpts := []vmi.DataVolumeOption{vmi.WithDataVolumeBlankSource()}
+		if checkupConfig.StorageClass != "" {
+			dvOpts = append(dvOpts, vmi.WithDataVolumeStorageClass(checkupConfig.StorageClass))
+		}
+		optionsToApply = append(optionsToApply, vmi.WithDataVolume(blankDvName, dvOpts...))
 	}
+
 	return vmi.NewVM(name, optionsToApply...)
 }
 
