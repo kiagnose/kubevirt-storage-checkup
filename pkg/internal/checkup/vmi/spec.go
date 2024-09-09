@@ -42,8 +42,8 @@ func NewVM(name string, options ...Option) *kvcorev1.VirtualMachine {
 			Name: name,
 		},
 		Spec: kvcorev1.VirtualMachineSpec{
-			Running:  Pointer(true),
-			Template: &kvcorev1.VirtualMachineInstanceTemplateSpec{},
+			RunStrategy: Pointer(kvcorev1.RunStrategyAlways),
+			Template:    &kvcorev1.VirtualMachineInstanceTemplateSpec{},
 		},
 	}
 
