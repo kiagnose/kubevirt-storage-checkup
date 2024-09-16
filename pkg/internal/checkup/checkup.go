@@ -780,6 +780,10 @@ func (c *Checkup) Results() status.Results {
 	return c.results
 }
 
+func (c *Checkup) Config() config.Config {
+	return c.checkupConfig
+}
+
 func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 	log.Print("checkVMIBoot")
 	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {

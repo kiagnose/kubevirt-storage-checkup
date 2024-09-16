@@ -26,6 +26,7 @@ import (
 
 	assert "github.com/stretchr/testify/require"
 
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/launcher"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
 )
@@ -85,10 +86,109 @@ func TestLauncherRunShouldFailWhen(t *testing.T) {
 	}
 }
 
+func TestLauncherSkipTeardownModes(t *testing.T) {
+	// Using this custom error to now wether the teardown was called or skipped
+	teardownCalledErr := errors.New("teardown called")
+	tests := map[string]struct {
+		checkup            checkupStub
+		reporter           reporterStub
+		expectedTeardown   bool
+		expectedFailure    bool
+		expectedSkipReason config.SkipTeardownMode
+	}{
+		"skip teardown on failure, with failure": {
+			checkup: checkupStub{
+				failRun:          errRun,
+				skipTeardownMode: config.SkipTeardownOnFailure,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   false,
+			expectedFailure:    true,
+			expectedSkipReason: config.SkipTeardownOnFailure,
+		},
+		"skip teardown on failure, no failure": {
+			checkup: checkupStub{
+				skipTeardownMode: config.SkipTeardownOnFailure,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   true,
+			expectedFailure:    false,
+			expectedSkipReason: config.SkipTeardownOnFailure,
+		},
+		"always skip teardown, with failure": {
+			checkup: checkupStub{
+				failRun:          errRun,
+				skipTeardownMode: config.SkipTeardownAlways,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   false,
+			expectedFailure:    true,
+			expectedSkipReason: config.SkipTeardownAlways,
+		},
+		"always skip teardown, no failure": {
+			checkup: checkupStub{
+				skipTeardownMode: config.SkipTeardownAlways,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   false,
+			expectedFailure:    false,
+			expectedSkipReason: config.SkipTeardownAlways,
+		},
+		"never skip teardown, with failure": {
+			checkup: checkupStub{
+				failRun:          errRun,
+				skipTeardownMode: config.SkipTeardownNever,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   true,
+			expectedFailure:    true,
+			expectedSkipReason: config.SkipTeardownNever,
+		},
+		"never skip teardown, no failure": {
+			checkup: checkupStub{
+				skipTeardownMode: config.SkipTeardownNever,
+				failTeardown:     teardownCalledErr,
+			},
+			reporter:           reporterStub{},
+			expectedTeardown:   true,
+			expectedFailure:    false,
+			expectedSkipReason: config.SkipTeardownNever,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			checkup := checkupStub{
+				failSetup:        tc.checkup.failSetup,
+				failRun:          tc.checkup.failRun,
+				failTeardown:     tc.checkup.failTeardown,
+				skipTeardownMode: tc.checkup.skipTeardownMode,
+			}
+
+			testLauncher := launcher.New(checkup, &tc.reporter)
+			err := testLauncher.Run(context.Background())
+
+			if tc.expectedFailure {
+				assert.Error(t, err)
+			} else if tc.expectedTeardown {
+				assert.Equal(t, tc.checkup.failTeardown, teardownCalledErr)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 type checkupStub struct {
-	failSetup    error
-	failRun      error
-	failTeardown error
+	failSetup        error
+	failRun          error
+	failTeardown     error
+	skipTeardownMode config.SkipTeardownMode
 }
 
 func (cs checkupStub) Setup(_ context.Context) error {
@@ -105,6 +205,12 @@ func (cs checkupStub) Teardown(_ context.Context) error {
 
 func (cs checkupStub) Results() status.Results {
 	return status.Results{}
+}
+
+func (cs checkupStub) Config() config.Config {
+	return config.Config{
+		SkipTeardown: cs.skipTeardownMode,
+	}
 }
 
 type reporterStub struct {
