@@ -36,6 +36,16 @@ const (
 	StorageClassParamName = "storageClass"
 	VMITimeoutParamName   = "vmiTimeout"
 	NumOfVMsParamName     = "numOfVMs"
+	SkipTeardownParamName = "skipTeardown"
+)
+
+// SkipTeardownMode defines the possible modes for skipping teardown.
+type SkipTeardownMode string
+
+const (
+	SkipTeardownOnFailure SkipTeardownMode = "onfailure"
+	SkipTeardownAlways    SkipTeardownMode = "always"
+	SkipTeardownNever     SkipTeardownMode = "never"
 )
 
 const (
@@ -44,8 +54,9 @@ const (
 )
 
 var (
-	ErrInvalidVMITimeout = errors.New("invalid VMI timeout")
-	ErrInvalidNumOfVMs   = errors.New("invalid number of VMIs")
+	ErrInvalidVMITimeout       = errors.New("invalid VMI timeout")
+	ErrInvalidNumOfVMs         = errors.New("invalid number of VMIs")
+	ErrInvalidSkipTeardownMode = errors.New("invalid skip teardown mode")
 )
 
 type Config struct {
@@ -54,6 +65,7 @@ type Config struct {
 	StorageClass string
 	VMITimeout   time.Duration
 	NumOfVMs     int
+	SkipTeardown SkipTeardownMode
 }
 
 func New(baseConfig kconfig.Config) (Config, error) {
@@ -87,6 +99,21 @@ func setOptionalParams(baseConfig kconfig.Config, newConfig Config) (Config, err
 			return Config{}, ErrInvalidNumOfVMs
 		}
 		newConfig.NumOfVMs = numOfVMs
+	}
+
+	if rawVal, exists := baseConfig.Params[SkipTeardownParamName]; exists && rawVal != "" {
+		switch SkipTeardownMode(rawVal) {
+		case SkipTeardownOnFailure, SkipTeardownAlways, SkipTeardownNever:
+			newConfig.SkipTeardown = SkipTeardownMode(rawVal)
+		default:
+			skip, err := strconv.ParseBool(rawVal)
+			if err != nil {
+				return Config{}, ErrInvalidSkipTeardownMode
+			}
+			if skip {
+				newConfig.SkipTeardown = SkipTeardownAlways
+			}
+		}
 	}
 
 	return newConfig, nil

@@ -25,6 +25,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
 )
 
@@ -33,6 +34,7 @@ type checkup interface {
 	Run(ctx context.Context) error
 	Teardown(ctx context.Context) error
 	Results() status.Results
+	Config() config.Config
 }
 
 type reporter interface {
@@ -74,6 +76,9 @@ func (l Launcher) Run(ctx context.Context) (runErr error) {
 	}
 
 	defer func() {
+		if l.shouldSkipTeardown(runStatus.FailureReason) {
+			return
+		}
 		if err := l.checkup.Teardown(context.Background()); err != nil {
 			runStatus.FailureReason = append(runStatus.FailureReason, err.Error())
 		}
@@ -85,6 +90,19 @@ func (l Launcher) Run(ctx context.Context) (runErr error) {
 	}
 
 	return nil
+}
+
+func (l Launcher) shouldSkipTeardown(failures []string) bool {
+	switch l.checkup.Config().SkipTeardown {
+	case config.SkipTeardownOnFailure:
+		return len(failures) > 0
+	case config.SkipTeardownAlways:
+		return true
+	case config.SkipTeardownNever:
+		return false
+	default:
+		return false
+	}
 }
 
 func failureReason(sts status.Status) error {
