@@ -35,6 +35,8 @@ Cluster admin should create the following cluster-reader permissions for dedicat
 |spec.param.storageClass|Optional storage class to be used instead of the default one|False||
 |spec.param.vmiTimeout|Optional timeout for VMI operations|False|Default is 3m|
 |spec.param.numOfVMs|Optional number of concurrent VMs to boot|False|Default is 10|
+|spec.param.skipTeardown|Controls whether the teardown steps should be skipped after checkup completion|False|Available modes: `always`, `onfailure`, `never`. Default is `never`|
+
 
 ### Example
 
@@ -51,6 +53,15 @@ and cleanup them with:
 ```bash
 envsubst < manifests/storage_checkup.yaml|kubectl delete -f -
 ```
+
+### SkipTeardown Modes
+
+The `skipTeardown` field provides more flexibility for debugging by allowing control over when teardown steps are skipped. The available modes are:
+
+- **`always`/`true`**: Skips the teardown process in all cases. This is useful when you want to keep resources for further inspection.
+- **`onfailure`**: Skips teardown only if a failure occurs. This is particularly helpful when debugging issues after a failure.
+- **`never`/`false`**: Always performs the teardown steps, ensuring that all resources are cleaned up after the checkup run. This is the default behavior.
+
 ## Checkup Results Retrieval
 
 After the checkup Job had completed, the results are made available at the user-supplied ConfigMap object:
