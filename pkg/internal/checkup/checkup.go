@@ -847,6 +847,11 @@ func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 		return err
 	}
 
+	if c.goldenImageSnap != nil {
+		c.results.VMVolumeClone = "DV cloneType: snapshot"
+		return nil
+	}
+
 	pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, getVMDvName(vmName))
 	if err != nil {
 		return err
