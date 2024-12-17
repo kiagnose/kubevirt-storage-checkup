@@ -606,6 +606,15 @@ func (cs *clientStub) ListVirtualMachinesInstances(ctx context.Context, namespac
 	return vmiList, nil
 }
 
+func (cs *clientStub) GetNamespace(ctx context.Context, name string) (*corev1.Namespace, error) {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	return ns, nil
+}
+
 func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
 	blockMode := corev1.PersistentVolumeBlock
 	pvc := &corev1.PersistentVolumeClaim{
