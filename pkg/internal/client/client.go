@@ -132,6 +132,10 @@ func (c *Client) ListCDIs(ctx context.Context) (*cdiv1.CDIList, error) {
 	return c.CdiClient().CdiV1beta1().CDIs().List(ctx, metav1.ListOptions{})
 }
 
+func (c *Client) GetNamespace(ctx context.Context, name string) (*corev1.Namespace, error) {
+	return c.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+}
+
 func (c *Client) GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error) {
 	return c.CoreV1().PersistentVolumeClaims(namespace).Get(ctx, name, metav1.GetOptions{})
 }

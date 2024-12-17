@@ -67,6 +67,7 @@ type kubeVirtStorageClient interface {
 	ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error)
 	ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error)
 	ListCDIs(ctx context.Context) (*cdiv1.CDIList, error)
+	GetNamespace(ctx context.Context, name string) (*corev1.Namespace, error)
 	GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error)
 	GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error)
 	GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error)
@@ -247,11 +248,20 @@ func (c *Checkup) checkVersions(ctx context.Context) error {
 func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
 	log.Print("checkGoldenImages")
 
+	const defaultGoldenImagesNamespace = "openshift-virtualization-os-images"
 	var cs goldenImagesCheckState
-	for i := range namespaces.Items {
-		ns := namespaces.Items[i].Name
-		if err := c.checkDataImportCrons(ctx, ns, &cs); err != nil {
+
+	if ns, err := c.client.GetNamespace(ctx, defaultGoldenImagesNamespace); err == nil {
+		if err := c.checkDataImportCrons(ctx, ns.Name, &cs); err != nil {
 			return err
+		}
+	}
+
+	for i := range namespaces.Items {
+		if ns := namespaces.Items[i].Name; ns != defaultGoldenImagesNamespace {
+			if err := c.checkDataImportCrons(ctx, ns, &cs); err != nil {
+				return err
+			}
 		}
 	}
 
