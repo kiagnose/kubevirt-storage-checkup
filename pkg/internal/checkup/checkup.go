@@ -79,8 +79,10 @@ const (
 	VMIUnderTestNamePrefix = "vmi-under-test"
 	hotplugVolumeName      = "hotplug-volume"
 	pvcName                = "checkup-pvc"
+	strTrue                = "true"
 
-	AnnDefaultStorageClass = "storageclass.kubernetes.io/is-default-class"
+	AnnDefaultVirtStorageClass = "storageclass.kubevirt.io/is-default-virt-class"
+	AnnDefaultStorageClass     = "storageclass.kubernetes.io/is-default-class"
 
 	ErrNoDefaultStorageClass         = "no default storage class"
 	ErrPvcNotBound                   = "pvc failed to bound"
@@ -89,14 +91,15 @@ const (
 	// FIXME: need to decide of we want to return errors in this cases
 	// errMissingVolumeSnapshotClass    = "there are StorageProfiles missing VolumeSnapshotClass"
 	// errVMsWithNonVirtRbdStorageClass = "there are VMs using the plain RBD storageclass when the virtualization storageclass exists"
-	ErrVMsWithUnsetEfsStorageClass = "there are VMs using an EFS storageclass where the gid and uid are not set in the storageclass"
-	ErrGoldenImagesNotUpToDate     = "there are golden images whose DataImportCron is not up to date or DataSource is not ready"
-	ErrGoldenImageNoDataSource     = "dataSource has no PVC or Snapshot source"
-	ErrBootFailedOnSomeVMs         = "some of the VMs failed to complete boot on time"
-	MessageBootCompletedOnAllVMs   = "Boot completed on all VMs on time"
-	MessageSkipNoGoldenImage       = "Skip check - no golden image PVC or Snapshot"
-	MessageSkipNoVMI               = "Skip check - no VMI"
-	MessageSkipSingleNode          = "Skip check - single node"
+	ErrVMsWithUnsetEfsStorageClass   = "there are VMs using an EFS storageclass where the gid and uid are not set in the storageclass"
+	ErrGoldenImagesNotUpToDate       = "there are golden images whose DataImportCron is not up to date or DataSource is not ready"
+	ErrGoldenImageNoDataSource       = "dataSource has no PVC or Snapshot source"
+	ErrBootFailedOnSomeVMs           = "some of the VMs failed to complete boot on time"
+	MessageBootCompletedOnAllVMs     = "Boot completed on all VMs on time"
+	MessageSkipNoDefaultStorageClass = "Skip check - no default storage class"
+	MessageSkipNoGoldenImage         = "Skip check - no golden image PVC or Snapshot"
+	MessageSkipNoVMI                 = "Skip check - no VMI"
+	MessageSkipSingleNode            = "Skip check - single node"
 
 	pollInterval = 5 * time.Second
 )
@@ -111,14 +114,15 @@ var UnsupportedProvisioners = map[string]struct{}{
 }
 
 type Checkup struct {
-	client          kubeVirtStorageClient
-	namespace       string
-	checkupConfig   config.Config
-	goldenImageScs  []string
-	goldenImagePvc  *corev1.PersistentVolumeClaim
-	goldenImageSnap *snapshotv1.VolumeSnapshot
-	vmUnderTest     *kvcorev1.VirtualMachine
-	results         status.Results
+	client              kubeVirtStorageClient
+	namespace           string
+	checkupConfig       config.Config
+	defaultStorageClass string
+	goldenImageScs      []string
+	goldenImagePvc      *corev1.PersistentVolumeClaim
+	goldenImageSnap     *snapshotv1.VolumeSnapshot
+	vmUnderTest         *kvcorev1.VirtualMachine
+	results             status.Results
 }
 
 type goldenImagesCheckState struct {
@@ -392,18 +396,35 @@ func (c *Checkup) updateGoldenImageSnapshot(snap *snapshotv1.VolumeSnapshot) {
 func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errStr *string) {
 	log.Print("checkDefaultStorageClass")
 
+	var multipleDefaultStorageClasses, hasDefaultVirtStorageClass, hasDefaultStorageClass bool
 	for i := range scs.Items {
 		sc := scs.Items[i]
-		if sc.Annotations[AnnDefaultStorageClass] == "true" {
-			if c.results.DefaultStorageClass != "" {
-				c.results.DefaultStorageClass = ErrMultipleDefaultStorageClasses
-				appendSep(errStr, ErrMultipleDefaultStorageClasses)
-				break
+		if sc.Annotations[AnnDefaultVirtStorageClass] == strTrue {
+			if !hasDefaultVirtStorageClass {
+				hasDefaultVirtStorageClass = true
+				c.defaultStorageClass = sc.Name
+			} else {
+				multipleDefaultStorageClasses = true
 			}
-			c.results.DefaultStorageClass = sc.Name
+		}
+		if sc.Annotations[AnnDefaultStorageClass] == strTrue {
+			if !hasDefaultStorageClass {
+				hasDefaultStorageClass = true
+				if !hasDefaultVirtStorageClass {
+					c.defaultStorageClass = sc.Name
+				}
+			} else {
+				multipleDefaultStorageClasses = true
+			}
 		}
 	}
-	if c.results.DefaultStorageClass == "" {
+
+	if multipleDefaultStorageClasses {
+		c.results.DefaultStorageClass = ErrMultipleDefaultStorageClasses
+		appendSep(errStr, ErrMultipleDefaultStorageClasses)
+	} else if c.defaultStorageClass != "" {
+		c.results.DefaultStorageClass = c.defaultStorageClass
+	} else {
 		c.results.DefaultStorageClass = ErrNoDefaultStorageClass
 		appendSep(errStr, ErrNoDefaultStorageClass)
 	}
@@ -411,6 +432,12 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 
 func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string) error {
 	log.Print("checkPVCCreationAndBinding")
+
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.PVCBound = MessageSkipNoDefaultStorageClass
+		return nil
+	}
 
 	dv := &cdiv1.DataVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -422,7 +449,7 @@ func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string
 				UID:        types.UID(c.checkupConfig.PodUID),
 			}},
 			Annotations: map[string]string{
-				"cdi.kubevirt.io/storage.bind.immediate.requested": "true",
+				"cdi.kubevirt.io/storage.bind.immediate.requested": strTrue,
 			},
 		},
 		Spec: cdiv1.DataVolumeSpec{
@@ -786,6 +813,13 @@ func (c *Checkup) Config() config.Config {
 
 func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 	log.Print("checkVMIBoot")
+
+	if c.defaultStorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.VMBootFromGoldenImage = MessageSkipNoDefaultStorageClass
+		return nil
+	}
+
 	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
 		log.Print(MessageSkipNoGoldenImage)
 		c.results.VMBootFromGoldenImage = MessageSkipNoGoldenImage
@@ -979,6 +1013,12 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) error {
 	numOfVMs := c.checkupConfig.NumOfVMs
 	log.Printf("checkConcurrentVMIBoot numOfVMs:%d", numOfVMs)
+
+	if c.defaultStorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.ConcurrentVMBoot = MessageSkipNoDefaultStorageClass
+		return nil
+	}
 
 	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
 		log.Print(MessageSkipNoGoldenImage)
