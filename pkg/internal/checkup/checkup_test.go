@@ -89,14 +89,24 @@ var tests = map[string]struct {
 	expectedErr     string
 }{
 	"noStorageClasses": {
-		clientConfig:    clientConfig{noStorageClasses: true},
-		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
-		expectedErr:     checkup.ErrNoDefaultStorageClass,
+		clientConfig: clientConfig{noStorageClasses: true, expectNoVMI: true},
+		expectedResults: map[string]string{
+			reporter.DefaultStorageClassKey:   checkup.ErrNoDefaultStorageClass,
+			reporter.PVCBoundKey:              checkup.MessageSkipNoDefaultStorageClass,
+			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoDefaultStorageClass,
+			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoDefaultStorageClass,
+		},
+		expectedErr: checkup.ErrNoDefaultStorageClass,
 	},
 	"noDefaultStorageClass": {
-		clientConfig:    clientConfig{noDefaultStorageClass: true},
-		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrNoDefaultStorageClass},
-		expectedErr:     checkup.ErrNoDefaultStorageClass,
+		clientConfig: clientConfig{noDefaultStorageClass: true, expectNoVMI: true},
+		expectedResults: map[string]string{
+			reporter.DefaultStorageClassKey:   checkup.ErrNoDefaultStorageClass,
+			reporter.PVCBoundKey:              checkup.MessageSkipNoDefaultStorageClass,
+			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoDefaultStorageClass,
+			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoDefaultStorageClass,
+		},
+		expectedErr: checkup.ErrNoDefaultStorageClass,
 	},
 	"multipleDefaultStorageClasses": {
 		clientConfig:    clientConfig{multipleDefaultStorageClasses: true},
@@ -527,6 +537,10 @@ func (cs *clientStub) ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv
 }
 
 func (cs *clientStub) ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error) {
+	if namespace != testNamespace {
+		return &cdiv1.DataImportCronList{}, nil
+	}
+
 	dicList := &cdiv1.DataImportCronList{
 		Items: []cdiv1.DataImportCron{
 			{
