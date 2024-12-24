@@ -108,8 +108,28 @@ var tests = map[string]struct {
 		},
 		expectedErr: checkup.ErrNoDefaultStorageClass,
 	},
+	"onlyDefaultStorageClass": {
+		clientConfig:    clientConfig{onlyDefaultStorageClass: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: testScName2},
+		expectedErr:     "",
+	},
+	"onlyDefaultVirtStorageClass": {
+		clientConfig:    clientConfig{onlyDefaultVirtStorageClass: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: testScName},
+		expectedErr:     "",
+	},
+	"bothDefaultStorageClasses": {
+		clientConfig:    clientConfig{bothDefaultStorageClasses: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: testScName},
+		expectedErr:     "",
+	},
 	"multipleDefaultStorageClasses": {
 		clientConfig:    clientConfig{multipleDefaultStorageClasses: true},
+		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
+		expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
+	},
+	"multipleDefaultVirtStorageClasses": {
+		clientConfig:    clientConfig{multipleDefaultVirtStorageClasses: true},
 		expectedResults: map[string]string{reporter.DefaultStorageClassKey: checkup.ErrMultipleDefaultStorageClasses},
 		expectedErr:     checkup.ErrMultipleDefaultStorageClasses,
 	},
@@ -257,20 +277,24 @@ func successfulRunResults(vmiUnderTestName string) map[string]string {
 }
 
 type clientConfig struct {
-	skipDeletion                  bool
-	noStorageClasses              bool
-	noDefaultStorageClass         bool
-	multipleDefaultStorageClasses bool
-	failPvcBound                  bool
-	unsetEfsStorageClass          bool
-	spIncomplete                  bool
-	noVolumeSnapshotClasses       bool
-	dicNoDataSource               bool
-	dataSourceNotReady            bool
-	expectNoVMI                   bool
-	cloneFallback                 bool
-	failMigration                 bool
-	singleNode                    bool
+	skipDeletion                      bool
+	noStorageClasses                  bool
+	noDefaultStorageClass             bool
+	onlyDefaultStorageClass           bool
+	onlyDefaultVirtStorageClass       bool
+	bothDefaultStorageClasses         bool
+	multipleDefaultStorageClasses     bool
+	multipleDefaultVirtStorageClasses bool
+	failPvcBound                      bool
+	unsetEfsStorageClass              bool
+	spIncomplete                      bool
+	noVolumeSnapshotClasses           bool
+	dicNoDataSource                   bool
+	dataSourceNotReady                bool
+	expectNoVMI                       bool
+	cloneFallback                     bool
+	failMigration                     bool
+	singleNode                        bool
 }
 
 type clientStub struct {
@@ -465,29 +489,41 @@ func (cs *clientStub) ListStorageClasses(ctx context.Context) (*storagev1.Storag
 		Items: []storagev1.StorageClass{
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        testScName,
-					Annotations: map[string]string{checkup.AnnDefaultStorageClass: "true"},
+					Name: testScName,
+					Annotations: map[string]string{
+						checkup.AnnDefaultVirtStorageClass: checkup.StrTrue,
+						checkup.AnnDefaultStorageClass:     checkup.StrFalse,
+					},
 				},
 			},
 			{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        testScName2,
-					Annotations: map[string]string{checkup.AnnDefaultStorageClass: "false"},
+					Name: testScName2,
+					Annotations: map[string]string{
+						checkup.AnnDefaultVirtStorageClass: checkup.StrFalse,
+						checkup.AnnDefaultStorageClass:     checkup.StrTrue,
+					},
 				},
 			},
 		},
 	}
-	if cs.noDefaultStorageClass {
-		scList.Items[0].Annotations[checkup.AnnDefaultStorageClass] = "false"
+	if cs.onlyDefaultStorageClass || cs.noDefaultStorageClass {
+		scList.Items[0].Annotations[checkup.AnnDefaultVirtStorageClass] = checkup.StrFalse
+	}
+	if cs.onlyDefaultVirtStorageClass || cs.noDefaultStorageClass {
+		scList.Items[1].Annotations[checkup.AnnDefaultStorageClass] = checkup.StrFalse
 	}
 	if cs.multipleDefaultStorageClasses {
-		scList.Items[1].Annotations[checkup.AnnDefaultStorageClass] = "true"
+		scList.Items[0].Annotations[checkup.AnnDefaultStorageClass] = checkup.StrTrue
+	}
+	if cs.multipleDefaultVirtStorageClasses {
+		scList.Items[1].Annotations[checkup.AnnDefaultVirtStorageClass] = checkup.StrTrue
 	}
 	if cs.unsetEfsStorageClass {
 		scList.Items = append(scList.Items, storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        "test-sc-unset-efs",
-				Annotations: map[string]string{checkup.AnnDefaultStorageClass: "false"},
+				Annotations: map[string]string{checkup.AnnDefaultStorageClass: checkup.StrFalse},
 			},
 			Provisioner: efsSc,
 			Parameters:  map[string]string{"uid": ""},
