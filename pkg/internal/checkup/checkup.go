@@ -80,7 +80,8 @@ const (
 	VMIUnderTestNamePrefix = "vmi-under-test"
 	hotplugVolumeName      = "hotplug-volume"
 	pvcName                = "checkup-pvc"
-	strTrue                = "true"
+	StrTrue                = "true"
+	StrFalse               = "false"
 
 	AnnDefaultVirtStorageClass = "storageclass.kubevirt.io/is-default-virt-class"
 	AnnDefaultStorageClass     = "storageclass.kubernetes.io/is-default-class"
@@ -409,7 +410,7 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 	var multipleDefaultStorageClasses, hasDefaultVirtStorageClass, hasDefaultStorageClass bool
 	for i := range scs.Items {
 		sc := scs.Items[i]
-		if sc.Annotations[AnnDefaultVirtStorageClass] == strTrue {
+		if sc.Annotations[AnnDefaultVirtStorageClass] == StrTrue {
 			if !hasDefaultVirtStorageClass {
 				hasDefaultVirtStorageClass = true
 				c.defaultStorageClass = sc.Name
@@ -417,7 +418,7 @@ func (c *Checkup) checkDefaultStorageClass(scs *storagev1.StorageClassList, errS
 				multipleDefaultStorageClasses = true
 			}
 		}
-		if sc.Annotations[AnnDefaultStorageClass] == strTrue {
+		if sc.Annotations[AnnDefaultStorageClass] == StrTrue {
 			if !hasDefaultStorageClass {
 				hasDefaultStorageClass = true
 				if !hasDefaultVirtStorageClass {
@@ -459,7 +460,7 @@ func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string
 				UID:        types.UID(c.checkupConfig.PodUID),
 			}},
 			Annotations: map[string]string{
-				"cdi.kubevirt.io/storage.bind.immediate.requested": strTrue,
+				"cdi.kubevirt.io/storage.bind.immediate.requested": StrTrue,
 			},
 		},
 		Spec: cdiv1.DataVolumeSpec{
@@ -824,7 +825,7 @@ func (c *Checkup) Config() config.Config {
 func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 	log.Print("checkVMIBoot")
 
-	if c.defaultStorageClass == "" {
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
 		log.Print(MessageSkipNoDefaultStorageClass)
 		c.results.VMBootFromGoldenImage = MessageSkipNoDefaultStorageClass
 		return nil
@@ -1029,7 +1030,7 @@ func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) er
 	numOfVMs := c.checkupConfig.NumOfVMs
 	log.Printf("checkConcurrentVMIBoot numOfVMs:%d", numOfVMs)
 
-	if c.defaultStorageClass == "" {
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
 		log.Print(MessageSkipNoDefaultStorageClass)
 		c.results.ConcurrentVMBoot = MessageSkipNoDefaultStorageClass
 		return nil
