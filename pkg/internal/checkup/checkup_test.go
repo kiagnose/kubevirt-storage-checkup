@@ -337,6 +337,10 @@ func (cs *clientStub) CreateVirtualMachine(ctx context.Context, namespace string
 					Type:   kvcorev1.VirtualMachineInstanceIsMigratable,
 					Status: corev1.ConditionTrue,
 				},
+				{
+					Type:   kvcorev1.VirtualMachineInstanceAgentConnected,
+					Status: corev1.ConditionTrue,
+				},
 			},
 		},
 	}
