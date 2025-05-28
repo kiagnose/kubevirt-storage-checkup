@@ -132,6 +132,14 @@ func WithMemory(guestMemory string) Option {
 	}
 }
 
+func WithTPM() Option {
+	return func(vm *kvcorev1.VirtualMachine) {
+		vm.Spec.Template.Spec.Domain.Devices.TPM = &kvcorev1.TPMDevice{
+			Persistent: Pointer(true),
+		}
+	}
+}
+
 func WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds int64) Option {
 	return func(vm *kvcorev1.VirtualMachine) {
 		vm.Spec.Template.Spec.TerminationGracePeriodSeconds = Pointer(terminationGracePeriodSeconds)
