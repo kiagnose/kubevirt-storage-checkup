@@ -1103,7 +1103,7 @@ func (c *Checkup) waitForVMIBoot(ctx context.Context, vmName string, result, err
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
 			for i := range vmi.Status.Conditions {
 				condition := vmi.Status.Conditions[i]
-				if condition.Type == kvcorev1.VirtualMachineInstanceReady && condition.Status == corev1.ConditionTrue {
+				if condition.Type == kvcorev1.VirtualMachineInstanceAgentConnected && condition.Status == corev1.ConditionTrue {
 					return true, nil
 				}
 			}
