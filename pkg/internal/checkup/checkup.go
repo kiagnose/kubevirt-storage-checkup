@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -299,6 +300,16 @@ func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs
 	if err != nil {
 		return err
 	}
+
+	sort.Slice(dics.Items, func(i, j int) bool {
+		iTS := dics.Items[i].Status.LastImportTimestamp
+		jTS := dics.Items[j].Status.LastImportTimestamp
+		if iTS != nil && jTS != nil {
+			return iTS.After(jTS.Time)
+		}
+		return iTS != nil && jTS == nil
+	})
+
 	for i := range dics.Items {
 		dic := &dics.Items[i]
 		pvc, snap, err := c.getGoldenImage(ctx, dic)
