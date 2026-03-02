@@ -214,16 +214,16 @@ func (c *Checkup) Run(ctx context.Context) error {
 func (c *Checkup) checkVersions(ctx context.Context) error {
 	log.Print("checkVersions")
 
+	ocpVersion := ""
 	ver, err := c.client.GetClusterVersion(ctx, "version")
 	if err != nil {
-		return err
-	}
-	ocpVersion := ""
-	for _, update := range ver.Status.History {
-		if update.State == configv1.CompletedUpdate {
-			// obtain the version from the last completed update
-			ocpVersion = update.Version
-			break
+		log.Printf("OpenShift ClusterVersion not available (non-OpenShift cluster): %v", err)
+	} else {
+		for _, update := range ver.Status.History {
+			if update.State == configv1.CompletedUpdate {
+				ocpVersion = update.Version
+				break
+			}
 		}
 	}
 

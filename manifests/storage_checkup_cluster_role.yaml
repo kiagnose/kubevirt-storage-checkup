@@ -1,0 +1,24 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubevirt-storage-checkup-reader
+rules:
+  - apiGroups: [ "" ]
+    resources: [ "pods", "namespaces", "nodes", "persistentvolumeclaims", "persistentvolumes" ]
+    verbs: [ "get", "list" ]
+  - apiGroups: [ "storage.k8s.io" ]
+    resources: [ "storageclasses", "csidrivers" ]
+    verbs: [ "get", "list" ]
+  - apiGroups: [ "snapshot.storage.k8s.io" ]
+    resources: [ "volumesnapshots", "volumesnapshotclasses" ]
+    verbs: [ "get", "list" ]
+  - apiGroups: [ "cdi.kubevirt.io" ]
+    resources: [ "storageprofiles", "dataimportcrons", "datasources", "cdis" ]
+    verbs: [ "get", "list" ]
+  - apiGroups: [ "kubevirt.io" ]
+    resources: [ "virtualmachineinstances" ]
+    verbs: [ "get", "list" ]
+  - apiGroups: [ "config.openshift.io" ]
+    resources: [ "clusterversions" ]
+    verbs: [ "get" ]

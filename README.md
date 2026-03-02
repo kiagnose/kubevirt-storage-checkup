@@ -27,6 +27,10 @@ Cluster admin should create the following cluster-reader permissions for dedicat
     namespace: <target-namespace>
 ```
 
+## Non-OpenShift / Vanilla Kubernetes
+
+If you are running this checkup on vanilla Kubernetes (kubeadm, kOps, etc.) rather than OpenShift, additional setup is required for RBAC, KubeVirt feature gates, networking, and golden images. See [docs/vanilla-k8s-guide.md](docs/vanilla-k8s-guide.md) for the full guide.
+
 ## Configuration
 
 |Key|Description|Is Mandatory|Remarks|
