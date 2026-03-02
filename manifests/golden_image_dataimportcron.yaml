@@ -1,0 +1,28 @@
+---
+# Golden image DataImportCron for non-OpenShift clusters.
+#
+# Usage:
+#   kubectl apply -n <target-namespace> -f manifests/golden_image_dataimportcron.yaml
+#   # Wait for the initial import to complete (~2-5 minutes):
+#   kubectl wait -n <target-namespace> dataimportcron/fedora-golden \
+#     --for=condition=UpToDate --timeout=600s
+#
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataImportCron
+metadata:
+  name: fedora-golden
+spec:
+  managedDataSource: fedora-golden
+  schedule: "0 */12 * * *"
+  garbageCollect: Outdated
+  importsToKeep: 1
+  template:
+    spec:
+      source:
+        registry:
+          url: "docker://quay.io/containerdisks/fedora:latest"
+          pullMethod: node
+      storage:
+        resources:
+          requests:
+            storage: 10Gi
