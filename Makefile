@@ -20,6 +20,8 @@ build:
 	$(CONTAINER_ENGINE) run --rm \
 		-v $(PWD):$(PROJECT_WORKING_DIR):Z \
 		-v $(PWD)/_go-cache:/root/.cache/go-build:Z \
+		-e GOOS=linux \
+		-e GOARCH=$(shell go env GOARCH) \
 		--workdir $(PROJECT_WORKING_DIR) \
 		$(GO_IMAGE_NAME):$(GO_IMAGE_TAG) \
 		go build -v -o ./bin/kubevirt-storage-checkup ./cmd/
