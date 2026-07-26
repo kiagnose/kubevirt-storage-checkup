@@ -35,6 +35,8 @@ import (
 const (
 	guestMemory                   = "2Gi"
 	terminationGracePeriodSeconds = 0
+	// Each VM gets 4 disks total: 1 boot volume (cloned from golden image) + 3 blank data volumes.
+	numBlankVolumes = 3
 )
 
 func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
@@ -61,12 +63,14 @@ func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapsh
 	}
 
 	if addBlankDataVolume {
-		blankDvName := fmt.Sprintf("%s-blank", dvName)
-		dvOpts := []vmi.DataVolumeOption{vmi.WithDataVolumeBlankSource()}
-		if checkupConfig.StorageClass != "" {
-			dvOpts = append(dvOpts, vmi.WithDataVolumeStorageClass(checkupConfig.StorageClass))
+		for i := 1; i <= numBlankVolumes; i++ {
+			blankDvName := fmt.Sprintf("%s-blank-%d", dvName, i)
+			blankDvOpts := []vmi.DataVolumeOption{vmi.WithDataVolumeBlankSource()}
+			if checkupConfig.StorageClass != "" {
+				blankDvOpts = append(blankDvOpts, vmi.WithDataVolumeStorageClass(checkupConfig.StorageClass))
+			}
+			optionsToApply = append(optionsToApply, vmi.WithDataVolume(blankDvName, blankDvOpts...))
 		}
-		optionsToApply = append(optionsToApply, vmi.WithDataVolume(blankDvName, dvOpts...))
 	}
 
 	return vmi.NewVM(name, optionsToApply...)
