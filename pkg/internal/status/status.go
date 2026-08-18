@@ -42,6 +42,7 @@ type Results struct {
 	VMLiveMigration                           string
 	VMHotplugVolume                           string
 	ConcurrentVMBoot                          string
+	PVCCapacity                               string
 }
 
 type Status struct {

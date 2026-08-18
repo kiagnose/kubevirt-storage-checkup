@@ -100,6 +100,11 @@ func (c *Client) DeletePersistentVolumeClaim(ctx context.Context, namespace, nam
 	return c.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }
 
+func (c *Client) CreatePersistentVolumeClaim(ctx context.Context, namespace string,
+	pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	return c.CoreV1().PersistentVolumeClaims(namespace).Create(ctx, pvc, metav1.CreateOptions{})
+}
+
 func (c *Client) ListNodes(ctx context.Context) (*corev1.NodeList, error) {
 	return c.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 }

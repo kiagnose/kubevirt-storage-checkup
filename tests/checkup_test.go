@@ -206,7 +206,7 @@ func newCheckupRole() *rbacv1.Role {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"persistentvolumeclaims"},
-				Verbs:     []string{"delete"},
+				Verbs:     []string{"create", "get", "delete"},
 			},
 		},
 	}

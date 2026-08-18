@@ -60,6 +60,8 @@ type kubeVirtStorageClient interface {
 	CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error)
 	DeleteDataVolume(ctx context.Context, namespace, name string) error
 	DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error
+	CreatePersistentVolumeClaim(ctx context.Context, namespace string,
+		pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error)
 	ListNodes(ctx context.Context) (*corev1.NodeList, error)
 	ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error)
 	ListStorageClasses(ctx context.Context) (*storagev1.StorageClassList, error)
@@ -86,8 +88,10 @@ const (
 
 	AnnDefaultVirtStorageClass = "storageclass.kubevirt.io/is-default-virt-class"
 	AnnDefaultStorageClass     = "storageclass.kubernetes.io/is-default-class"
+	AnnSelectedNode            = "volume.kubernetes.io/selected-node"
 
 	ErrNoDefaultStorageClass         = "no default storage class"
+	ErrPVCCapacityMismatch           = "PVC capacity is less than requested"
 	ErrPvcNotBound                   = "pvc failed to bound"
 	ErrMultipleDefaultStorageClasses = "there are multiple default storage classes"
 	ErrEmptyClaimPropertySets        = "there are StorageProfiles with empty ClaimPropertySets (unknown provisioners)"
@@ -161,6 +165,11 @@ func (c *Checkup) Run(ctx context.Context) error {
 
 	c.checkDefaultStorageClass(scs, &errStr)
 	err = c.checkPVCCreationAndBinding(ctx, &errStr)
+	if err != nil {
+		return err
+	}
+
+	err = c.checkPVCCapacity(ctx, &errStr)
 	if err != nil {
 		return err
 	}
@@ -881,6 +890,117 @@ func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 	}
 
 	return nil
+}
+
+func (c *Checkup) checkPVCCapacity(ctx context.Context, errStr *string) error {
+	log.Print("checkPVCCapacity")
+
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.PVCCapacity = MessageSkipNoDefaultStorageClass
+		return nil
+	}
+
+	requestedSize := "12345Mi"
+
+	scName := c.defaultStorageClass
+	if c.checkupConfig.StorageClass != "" {
+		scName = c.checkupConfig.StorageClass
+	}
+
+	nodeName, err := c.getSchedulableNode(ctx)
+	if err != nil {
+		return err
+	}
+
+	pvcName := fmt.Sprintf("capacity-check-pvc-%s", rand.String(5)) //nolint:mnd
+	blockMode := corev1.PersistentVolumeBlock
+	pvc := &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvcName,
+			Annotations: map[string]string{
+				AnnSelectedNode: nodeName,
+			},
+		},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes:      []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			StorageClassName: &scName,
+			VolumeMode:       &blockMode,
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(requestedSize),
+				},
+			},
+		},
+	}
+
+	log.Printf("checkPVCCapacity: creating PVC %q (%s) with SC %q on node %q", pvcName, requestedSize, scName, nodeName)
+	if _, err = c.client.CreatePersistentVolumeClaim(ctx, c.namespace, pvc); err != nil {
+		return fmt.Errorf("failed to create PVC %q: %w", pvcName, err)
+	}
+	defer func() {
+		if delErr := c.client.DeletePersistentVolumeClaim(ctx, c.namespace, pvcName); delErr != nil {
+			log.Printf("checkPVCCapacity: failed to delete PVC %q: %v", pvcName, delErr)
+		}
+	}()
+
+	if err = wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, func(ctx context.Context) (bool, error) {
+		p, getErr := c.client.GetPersistentVolumeClaim(ctx, c.namespace, pvcName)
+		if getErr != nil {
+			return false, getErr
+		}
+		return p.Status.Phase == corev1.ClaimBound, nil
+	}); err != nil {
+		res := fmt.Sprintf("PVC %q failed to bind: %v", pvcName, err)
+		log.Print(res)
+		appendSep(&c.results.PVCCapacity, res)
+		appendSep(errStr, ErrPvcNotBound)
+		return nil
+	}
+
+	boundPVC, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, pvcName)
+	if err != nil {
+		return fmt.Errorf("failed to get PVC %q: %w", pvcName, err)
+	}
+
+	capacity := boundPVC.Status.Capacity[corev1.ResourceStorage]
+	capacityMi := capacity.Value() / (1024 * 1024)
+
+	if capacity.Cmp(resource.MustParse(requestedSize)) < 0 {
+		res := fmt.Sprintf("PVC %q: requested %s, got %dMi - capacity mismatch", pvcName, requestedSize, capacityMi)
+		log.Print(res)
+		appendSep(&c.results.PVCCapacity, res)
+		appendSep(errStr, ErrPVCCapacityMismatch)
+	} else {
+		res := fmt.Sprintf("PVC %q: requested %s, got %dMi", pvcName, requestedSize, capacityMi)
+		log.Print(res)
+		appendSep(&c.results.PVCCapacity, res)
+	}
+
+	return nil
+}
+
+func (c *Checkup) getSchedulableNode(ctx context.Context) (string, error) {
+	nodes, err := c.client.ListNodes(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list nodes: %w", err)
+	}
+	for i := range nodes.Items {
+		node := &nodes.Items[i]
+		if !node.Spec.Unschedulable && isNodeReady(node) {
+			return node.Name, nil
+		}
+	}
+	return "", errors.New("no ready schedulable nodes found")
+}
+
+func isNodeReady(node *corev1.Node) bool {
+	for i := range node.Status.Conditions {
+		if node.Status.Conditions[i].Type == corev1.NodeReady {
+			return node.Status.Conditions[i].Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) error {

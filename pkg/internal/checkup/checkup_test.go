@@ -32,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -78,8 +79,12 @@ func TestCheckupShouldSucceed(t *testing.T) {
 	assert.Empty(t, testClient.createdVMs)
 	assert.Empty(t, testClient.createdVMIs)
 
-	expectedResults := successfulRunResults(vmiUnderTestName)
 	actualResults := reporter.FormatResults(testCheckup.Results())
+	assert.Contains(t, actualResults[reporter.PVCCapacityKey], "requested 12345Mi, got 12345Mi")
+	delete(actualResults, reporter.PVCCapacityKey)
+
+	expectedResults := successfulRunResults(vmiUnderTestName)
+	delete(expectedResults, reporter.PVCCapacityKey)
 	assert.Equal(t, expectedResults, actualResults)
 }
 
@@ -87,12 +92,14 @@ var tests = map[string]struct {
 	clientConfig    clientConfig
 	expectedResults map[string]string
 	expectedErr     string
+	resultsContains bool
 }{
 	"noStorageClasses": {
 		clientConfig: clientConfig{noStorageClasses: true, expectNoVMI: true},
 		expectedResults: map[string]string{
 			reporter.DefaultStorageClassKey:   checkup.ErrNoDefaultStorageClass,
 			reporter.PVCBoundKey:              checkup.MessageSkipNoDefaultStorageClass,
+			reporter.PVCCapacityKey:           checkup.MessageSkipNoDefaultStorageClass,
 			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoDefaultStorageClass,
 			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoDefaultStorageClass,
 		},
@@ -103,6 +110,7 @@ var tests = map[string]struct {
 		expectedResults: map[string]string{
 			reporter.DefaultStorageClassKey:   checkup.ErrNoDefaultStorageClass,
 			reporter.PVCBoundKey:              checkup.MessageSkipNoDefaultStorageClass,
+			reporter.PVCCapacityKey:           checkup.MessageSkipNoDefaultStorageClass,
 			reporter.VMBootFromGoldenImageKey: checkup.MessageSkipNoDefaultStorageClass,
 			reporter.ConcurrentVMBootKey:      checkup.MessageSkipNoDefaultStorageClass,
 		},
@@ -186,6 +194,14 @@ var tests = map[string]struct {
 		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "Skip check - single node"},
 		expectedErr:     "",
 	},
+	"pvcCapacityMismatch": {
+		clientConfig:    clientConfig{pvcCapacityMismatch: true},
+		resultsContains: true,
+		expectedResults: map[string]string{
+			reporter.PVCCapacityKey: "requested 12345Mi, got 512Mi - capacity mismatch",
+		},
+		expectedErr: checkup.ErrPVCCapacityMismatch,
+	},
 }
 
 func TestCheckupShouldReturnErrorWhen(t *testing.T) {
@@ -207,10 +223,20 @@ func TestCheckupShouldReturnErrorWhen(t *testing.T) {
 				checkOwnerRef(t, testClient)
 			}
 
-			expectedResults := fullExpectedResults(vmiUnderTestName, tc.expectedResults)
 			actualResults := reporter.FormatResults(testCheckup.Results())
-
-			assert.Equal(t, expectedResults, actualResults)
+			if tc.resultsContains {
+				for key, substr := range tc.expectedResults {
+					substr = strings.ReplaceAll(substr, "%s", vmiUnderTestName)
+					assert.Contains(t, actualResults[key], substr, "key %s", key)
+				}
+			} else {
+				expectedResults := fullExpectedResults(vmiUnderTestName, tc.expectedResults)
+				assert.Contains(t, actualResults[reporter.PVCCapacityKey],
+					expectedResults[reporter.PVCCapacityKey])
+				delete(actualResults, reporter.PVCCapacityKey)
+				delete(expectedResults, reporter.PVCCapacityKey)
+				assert.Equal(t, expectedResults, actualResults)
+			}
 			if tc.expectedErr != "" {
 				assert.ErrorContains(t, err, tc.expectedErr)
 			} else {
@@ -273,6 +299,7 @@ func successfulRunResults(vmiUnderTestName string) map[string]string {
 		reporter.VMHotplugVolumeKey: fmt.Sprintf("VMI %q hotplug volume ready\nVMI %q hotplug volume removed",
 			vmiUnderTestName, vmiUnderTestName),
 		reporter.ConcurrentVMBootKey: "Boot completed on all VMs on time",
+		reporter.PVCCapacityKey:      "requested 12345Mi, got 12345Mi",
 	}
 }
 
@@ -295,6 +322,7 @@ type clientConfig struct {
 	cloneFallback                     bool
 	failMigration                     bool
 	singleNode                        bool
+	pvcCapacityMismatch               bool
 }
 
 type clientStub struct {
@@ -455,6 +483,13 @@ func (cs *clientStub) DeletePersistentVolumeClaim(ctx context.Context, namespace
 	return nil
 }
 
+func (cs *clientStub) CreatePersistentVolumeClaim(ctx context.Context, namespace string,
+	pvc *corev1.PersistentVolumeClaim) (*corev1.PersistentVolumeClaim, error) {
+	pvc.Namespace = namespace
+	pvc.Status.Phase = corev1.ClaimBound
+	return pvc, nil
+}
+
 func (cs *clientStub) ListNodes(ctx context.Context) (*corev1.NodeList, error) {
 	nodeList := &corev1.NodeList{}
 	itemCount := 2
@@ -465,6 +500,12 @@ func (cs *clientStub) ListNodes(ctx context.Context) (*corev1.NodeList, error) {
 		nodeList.Items = append(nodeList.Items, corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: fmt.Sprintf("node-%d", i),
+			},
+			Status: corev1.NodeStatus{
+				Conditions: []corev1.NodeCondition{{
+					Type:   corev1.NodeReady,
+					Status: corev1.ConditionTrue,
+				}},
 			},
 		})
 	}
@@ -668,10 +709,25 @@ func (cs *clientStub) GetPersistentVolumeClaim(ctx context.Context, namespace, n
 		},
 		Status: corev1.PersistentVolumeClaimStatus{
 			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteMany},
+			Capacity: corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("1Gi"),
+			},
 		},
 	}
 
-	if cs.failPvcBound {
+	if strings.HasPrefix(name, "capacity-check-pvc-") {
+		if cs.pvcCapacityMismatch {
+			pvc.Status.Capacity = corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("512Mi"),
+			}
+		} else {
+			pvc.Status.Capacity = corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse("12345Mi"),
+			}
+		}
+	}
+
+	if cs.failPvcBound && !strings.HasPrefix(name, "capacity-check-pvc-") {
 		pvc.Status.Phase = corev1.ClaimPending
 	} else {
 		pvc.Status.Phase = corev1.ClaimBound
