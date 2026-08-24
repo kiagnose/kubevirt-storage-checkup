@@ -482,39 +482,61 @@ func (cs *clientStub) CreateVirtualMachineInstanceMigration(ctx context.Context,
 	return vmim, nil
 }
 
-func (cs *clientStub) AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
-	addVolumeOptions *kvcorev1.AddVolumeOptions) error {
-	vmiFullName := objectFullName(namespace, name)
-	vmi, exist := cs.createdVMIs[vmiFullName]
+func (cs *clientStub) GetVirtualMachine(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachine, error) {
+	vmFullName := objectFullName(namespace, name)
+	vm, exist := cs.createdVMs[vmFullName]
 	if !exist {
-		return errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, name)
+		return nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachines"}, name)
 	}
-	vmi.Status.VolumeStatus = append(vmi.Status.VolumeStatus, kvcorev1.VolumeStatus{
-		Name:          addVolumeOptions.Name,
-		HotplugVolume: &kvcorev1.HotplugVolumeStatus{},
-		Phase:         kvcorev1.VolumeReady,
-	})
-
-	return nil
+	return vm.DeepCopy(), nil
 }
 
-func (cs *clientStub) RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
-	removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error {
-	vmiFullName := objectFullName(namespace, name)
-	vmi, exist := cs.createdVMIs[vmiFullName]
-	if !exist {
-		return errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, name)
+func (cs *clientStub) PatchVirtualMachine(ctx context.Context, namespace string, _, modified *kvcorev1.VirtualMachine) (
+	*kvcorev1.VirtualMachine, error) {
+	vmFullName := objectFullName(namespace, modified.Name)
+	if _, exist := cs.createdVMs[vmFullName]; !exist {
+		return nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachines"}, modified.Name)
 	}
-	volStat := vmi.Status.VolumeStatus
-	for i, vs := range volStat {
-		if vs.Name == removeVolumeOptions.Name {
-			volStat = append(volStat[:i], volStat[i+1:]...)
-			break
+	cs.createdVMs[vmFullName] = modified
+
+	if vmi, exist := cs.createdVMIs[vmFullName]; exist {
+		syncHotplugVolumeStatus(vmi, modified)
+	}
+
+	return modified, nil
+}
+
+func syncHotplugVolumeStatus(vmi *kvcorev1.VirtualMachineInstance, vm *kvcorev1.VirtualMachine) {
+	hotplugNames := map[string]struct{}{}
+	for _, vol := range vm.Spec.Template.Spec.Volumes {
+		if vol.DataVolume != nil && vol.DataVolume.Hotpluggable {
+			hotplugNames[vol.Name] = struct{}{}
 		}
 	}
-	vmi.Status.VolumeStatus = volStat
 
-	return nil
+	var volumeStatus []kvcorev1.VolumeStatus
+	existingHotplug := map[string]struct{}{}
+	for _, vs := range vmi.Status.VolumeStatus {
+		if vs.HotplugVolume == nil {
+			volumeStatus = append(volumeStatus, vs)
+			continue
+		}
+		if _, ok := hotplugNames[vs.Name]; ok {
+			volumeStatus = append(volumeStatus, vs)
+			existingHotplug[vs.Name] = struct{}{}
+		}
+	}
+	for name := range hotplugNames {
+		if _, ok := existingHotplug[name]; ok {
+			continue
+		}
+		volumeStatus = append(volumeStatus, kvcorev1.VolumeStatus{
+			Name:          name,
+			HotplugVolume: &kvcorev1.HotplugVolumeStatus{},
+			Phase:         kvcorev1.VolumeReady,
+		})
+	}
+	vmi.Status.VolumeStatus = volumeStatus
 }
 
 func (cs *clientStub) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {

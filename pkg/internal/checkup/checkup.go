@@ -56,12 +56,11 @@ type kubeVirtStorageClient interface {
 	CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (*kvcorev1.VirtualMachine, error)
 	DeleteVirtualMachine(ctx context.Context, namespace, name string) error
 	StopVirtualMachine(ctx context.Context, namespace, name string, stopOptions *kvcorev1.StopOptions) error
+	GetVirtualMachine(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachine, error)
+	PatchVirtualMachine(ctx context.Context, namespace string, original, modified *kvcorev1.VirtualMachine) (*kvcorev1.VirtualMachine, error)
 	GetVirtualMachineInstance(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachineInstance, error)
 	CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
 		vmim *kvcorev1.VirtualMachineInstanceMigration) (*kvcorev1.VirtualMachineInstanceMigration, error)
-	AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string, addVolumeOptions *kvcorev1.AddVolumeOptions) error
-	RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
-		removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error
 	CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error)
 	DeleteDataVolume(ctx context.Context, namespace, name string) error
 	DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error
@@ -211,7 +210,7 @@ func (c *Checkup) Run(ctx context.Context) error {
 	if err := c.checkVMILiveMigration(ctx, &errStr); err != nil {
 		return err
 	}
-	if err := c.checkVMIHotplugVolume(ctx, &errStr); err != nil {
+	if err := c.checkVMHotplugVolume(ctx, &errStr); err != nil {
 		return err
 	}
 
@@ -982,8 +981,8 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 	return nil
 }
 
-func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) error {
-	log.Print("checkVMIHotplugVolume")
+func (c *Checkup) checkVMHotplugVolume(ctx context.Context, errStr *string) error {
+	log.Print("checkVMHotplugVolume")
 
 	if c.vmUnderTest == nil {
 		log.Print(MessageSkipNoVMI)
@@ -1008,25 +1007,8 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 		return err
 	}
 
-	addVolumeOpts := &kvcorev1.AddVolumeOptions{
-		Name: hotplugVolumeName,
-		Disk: &kvcorev1.Disk{
-			DiskDevice: kvcorev1.DiskDevice{
-				Disk: &kvcorev1.DiskTarget{
-					Bus: "scsi",
-				},
-			},
-		},
-		VolumeSource: &kvcorev1.HotplugVolumeSource{
-			DataVolume: &kvcorev1.DataVolumeSource{
-				Name:         hotplugVolumeName,
-				Hotpluggable: true,
-			},
-		},
-	}
-
 	vmName := c.vmUnderTest.Name
-	if err := c.client.AddVirtualMachineInstanceVolume(ctx, c.namespace, vmName, addVolumeOpts); err != nil {
+	if err := c.hotplugVolume(ctx, vmName, hotplugVolumeName); err != nil {
 		return err
 	}
 
@@ -1044,11 +1026,7 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 		return err
 	}
 
-	removeVolumeOpts := &kvcorev1.RemoveVolumeOptions{
-		Name: hotplugVolumeName,
-	}
-
-	if err := c.client.RemoveVirtualMachineInstanceVolume(ctx, c.namespace, vmName, removeVolumeOpts); err != nil {
+	if err := c.unplugVolume(ctx, vmName, hotplugVolumeName); err != nil {
 		return err
 	}
 
@@ -1066,6 +1044,65 @@ func (c *Checkup) checkVMIHotplugVolume(ctx context.Context, errStr *string) err
 	}
 
 	return nil
+}
+
+func (c *Checkup) hotplugVolume(ctx context.Context, vmName, volumeName string) error {
+	vm, err := c.client.GetVirtualMachine(ctx, c.namespace, vmName)
+	if err != nil {
+		return err
+	}
+	original := vm.DeepCopy()
+
+	volume := kvcorev1.Volume{
+		Name: volumeName,
+		VolumeSource: kvcorev1.VolumeSource{
+			DataVolume: &kvcorev1.DataVolumeSource{
+				Name:         volumeName,
+				Hotpluggable: true,
+			},
+		},
+	}
+	disk := kvcorev1.Disk{
+		Name: volumeName,
+		DiskDevice: kvcorev1.DiskDevice{
+			Disk: &kvcorev1.DiskTarget{
+				Bus: kvcorev1.DiskBusSCSI,
+			},
+		},
+	}
+
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, volume)
+	vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, disk)
+
+	_, err = c.client.PatchVirtualMachine(ctx, c.namespace, original, vm)
+	return err
+}
+
+func (c *Checkup) unplugVolume(ctx context.Context, vmName, volumeName string) error {
+	vm, err := c.client.GetVirtualMachine(ctx, c.namespace, vmName)
+	if err != nil {
+		return err
+	}
+	original := vm.DeepCopy()
+
+	filteredVolumes := make([]kvcorev1.Volume, 0, len(vm.Spec.Template.Spec.Volumes))
+	for _, vol := range vm.Spec.Template.Spec.Volumes {
+		if vol.Name != volumeName {
+			filteredVolumes = append(filteredVolumes, vol)
+		}
+	}
+	vm.Spec.Template.Spec.Volumes = filteredVolumes
+
+	filteredDisks := make([]kvcorev1.Disk, 0, len(vm.Spec.Template.Spec.Domain.Devices.Disks))
+	for _, disk := range vm.Spec.Template.Spec.Domain.Devices.Disks {
+		if disk.Name != volumeName {
+			filteredDisks = append(filteredDisks, disk)
+		}
+	}
+	vm.Spec.Template.Spec.Domain.Devices.Disks = filteredDisks
+
+	_, err = c.client.PatchVirtualMachine(ctx, c.namespace, original, vm)
+	return err
 }
 
 func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) error {

@@ -16,20 +16,22 @@ these must be configured manually.
 
 ## 1. KubeVirt Configuration
 
-The checkup tests volume hotplug and live migration, which require specific
-KubeVirt settings that are not enabled by default.
+The checkup tests volume hotplug, VM snapshots, and live migration, which require
+specific KubeVirt settings that are not enabled by default.
 
 ### Feature Gates
 
-Enable the `HotplugVolumes` feature gate:
+Enable the `DeclarativeHotplugVolumes` and `Snapshot` feature gates:
 
 ```bash
 kubectl patch kubevirt kubevirt -n kubevirt --type=merge \
-  -p '{"spec":{"configuration":{"developerConfiguration":{"featureGates":["HotplugVolumes"]}}}}'
+  -p '{"spec":{"configuration":{"developerConfiguration":{"featureGates":["DeclarativeHotplugVolumes","Snapshot"]}}}}'
 ```
 
-Without this, the hotplug volume check will fail with:
-`Enable DeclarativeHotplugVolumes or HotplugVolumes feature gate to use this API.`
+- **DeclarativeHotplugVolumes**: Required for the hotplug volume check. The checkup
+  adds and removes hotpluggable volumes on the VirtualMachine spec.
+- **Snapshot**: Required for VM snapshot creation and restore tests. Without this,
+  snapshot tests will be skipped.
 
 ### Default Network Interface
 
@@ -44,14 +46,14 @@ Without this, KubeVirt creates VMs with bridge networking by default, which
 is not live-migratable. The live migration check will be skipped with:
 `cannot migrate VMI which does not use masquerade [...]`
 
-Both settings can be applied in a single patch:
+All settings can be applied in a single patch:
 
 ```bash
 kubectl patch kubevirt kubevirt -n kubevirt --type=merge -p '{
   "spec": {
     "configuration": {
       "developerConfiguration": {
-        "featureGates": ["HotplugVolumes"]
+        "featureGates": ["DeclarativeHotplugVolumes", "Snapshot"]
       },
       "network": {
         "defaultNetworkInterface": "masquerade"
@@ -66,6 +68,11 @@ kubectl patch kubevirt kubevirt -n kubevirt --type=merge -p '{
 The upstream instructions reference `cluster-reader`, an OpenShift-only
 ClusterRole. On vanilla Kubernetes, use the provided ClusterRole manifest
 instead.
+
+The namespace Role in `manifests/storage_checkup_permissions.yaml` grants
+`create`, `delete`, `get`, and `patch` on VirtualMachines. `get`/`patch` are
+required for declarative volume hotplug (the checkup patches the VM spec
+rather than calling the addvolume/removevolume subresources).
 
 Apply the namespace-scoped RBAC:
 

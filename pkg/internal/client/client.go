@@ -21,12 +21,15 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 
+	jsonpatch "github.com/evanphx/json-patch"
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
 	configv1 "github.com/openshift/api/config/v1"
 	configv1client "github.com/openshift/client-go/config/clientset/versioned/typed/config/v1"
@@ -75,6 +78,27 @@ func (c *Client) StopVirtualMachine(ctx context.Context, namespace, name string,
 	return c.VirtualMachine(namespace).Stop(ctx, name, stopOptions)
 }
 
+func (c *Client) GetVirtualMachine(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachine, error) {
+	return c.VirtualMachine(namespace).Get(ctx, name, &metav1.GetOptions{})
+}
+
+func (c *Client) PatchVirtualMachine(ctx context.Context, namespace string, original, modified *kvcorev1.VirtualMachine) (
+	*kvcorev1.VirtualMachine, error) {
+	originalJSON, err := json.Marshal(original)
+	if err != nil {
+		return nil, err
+	}
+	modifiedJSON, err := json.Marshal(modified)
+	if err != nil {
+		return nil, err
+	}
+	patch, err := jsonpatch.CreateMergePatch(originalJSON, modifiedJSON)
+	if err != nil {
+		return nil, err
+	}
+	return c.VirtualMachine(namespace).Patch(ctx, modified.Name, types.MergePatchType, patch, &metav1.PatchOptions{})
+}
+
 func (c *Client) GetVirtualMachineInstance(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachineInstance, error) {
 	return c.VirtualMachineInstance(namespace).Get(ctx, name, &metav1.GetOptions{})
 }
@@ -82,16 +106,6 @@ func (c *Client) GetVirtualMachineInstance(ctx context.Context, namespace, name 
 func (c *Client) CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
 	vmim *kvcorev1.VirtualMachineInstanceMigration) (*kvcorev1.VirtualMachineInstanceMigration, error) {
 	return c.VirtualMachineInstanceMigration(namespace).Create(vmim, &metav1.CreateOptions{})
-}
-
-func (c *Client) AddVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
-	addVolumeOptions *kvcorev1.AddVolumeOptions) error {
-	return c.VirtualMachineInstance(namespace).AddVolume(ctx, name, addVolumeOptions)
-}
-
-func (c *Client) RemoveVirtualMachineInstanceVolume(ctx context.Context, namespace, name string,
-	removeVolumeOptions *kvcorev1.RemoveVolumeOptions) error {
-	return c.VirtualMachineInstance(namespace).RemoveVolume(ctx, name, removeVolumeOptions)
 }
 
 func (c *Client) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {

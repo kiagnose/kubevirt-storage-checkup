@@ -3,6 +3,7 @@ module github.com/kiagnose/kubevirt-storage-checkup
 go 1.26
 
 require (
+	github.com/evanphx/json-patch v4.12.0+incompatible
 	github.com/kiagnose/kiagnose v0.3.0
 	github.com/kubernetes-csi/external-snapshotter/client/v4 v4.2.0
 	github.com/onsi/ginkgo/v2 v2.9.1
@@ -22,7 +23,6 @@ require (
 	github.com/coreos/prometheus-operator v0.38.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
-	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
 	github.com/go-kit/kit v0.13.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect

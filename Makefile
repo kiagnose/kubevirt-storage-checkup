@@ -22,7 +22,7 @@ build:
 		-v $(PWD)/_go-cache:/root/.cache/go-build:Z \
 		--workdir $(PROJECT_WORKING_DIR) \
 		$(GO_IMAGE_NAME):$(GO_IMAGE_TAG) \
-		go build -v -o ./bin/kubevirt-storage-checkup ./cmd/
+		go build -buildvcs=false -v -o ./bin/kubevirt-storage-checkup ./cmd/
 
 	$(CONTAINER_ENGINE) build . -t $(CHECKUP_IMAGE_NAME):$(CHECKUP_IMAGE_TAG)
 .PHONY: build

@@ -6,6 +6,8 @@ This checkup performs storage checks, validating storage is working correctly fo
 
 The [following](manifests/storage_checkup_permissions.yaml) ServiceAccount, Role and RoleBinding should be applied on the test namespace.
 
+The Role grants `create`/`delete`/`get`/`patch` on VirtualMachines. `get` and `patch` are used for declarative volume hotplug.
+
 ```bash
 kubectl apply -n <target-namespace> -f manifests/storage_checkup_permissions.yaml
 ```
