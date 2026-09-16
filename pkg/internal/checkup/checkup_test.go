@@ -181,14 +181,15 @@ var tests = map[string]struct {
 		expectedErr:     "DV clone fallback reason: reason",
 	},
 	"migrationFails": {
-		clientConfig:    clientConfig{failMigration: true},
-		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: migration failed"},
-		expectedErr:     "migration failed",
+		clientConfig: clientConfig{failMigration: true},
+		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "failed waiting for VMI \"%s\" migration completed: " +
+			"migration failed: insufficient memory on target node"},
+		expectedErr: "migration failed: insufficient memory on target node",
 	},
 	"snapshotFails": {
 		clientConfig: clientConfig{failSnapshot: true},
 		expectedResults: map[string]string{
-			reporter.VMSnapshotKey: `failed waiting for VMSnapshot "snapshot-%s" after 0s: snapshot failed`,
+			reporter.VMSnapshotKey: `failed waiting for VMSnapshot "snapshot-%s" after 0s: snapshot failed: VolumeSnapshotClass not found`,
 			reporter.VMRestoreKey:  checkup.MessageSkipNoSnapshot,
 		},
 		expectedErr: `snapshot failed`,
@@ -210,7 +211,7 @@ var tests = map[string]struct {
 	},
 	"skipMigrationOnSingleNode": {
 		clientConfig:    clientConfig{singleNode: true},
-		expectedResults: map[string]string{reporter.VMLiveMigrationKey: "Skip check - single node"},
+		expectedResults: map[string]string{reporter.VMLiveMigrationKey: checkup.MessageSkipSingleNode},
 		expectedErr:     "",
 	},
 }
@@ -361,6 +362,7 @@ type clientStub struct {
 	vmCreationFailure error
 	vmDeletionFailure error
 	vmiGetFailure     error
+	createdMigration  *kvcorev1.VirtualMachineInstanceMigration
 	clientConfig
 }
 
@@ -479,9 +481,20 @@ func (cs *clientStub) CreateVirtualMachineInstanceMigration(ctx context.Context,
 			Completed: false,
 			Failed:    true,
 		}
+		vmim.Status.Conditions = []kvcorev1.VirtualMachineInstanceMigrationCondition{
+			{Status: corev1.ConditionTrue, Message: "insufficient memory on target node"},
+		}
 	}
+	cs.createdMigration = vmim
 
 	return vmim, nil
+}
+
+func (cs *clientStub) GetVirtualMachineInstanceMigration(namespace, name string) (*kvcorev1.VirtualMachineInstanceMigration, error) {
+	if cs.createdMigration == nil {
+		return nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstancemigrations"}, name)
+	}
+	return cs.createdMigration, nil
 }
 
 func (cs *clientStub) GetVirtualMachine(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachine, error) {
@@ -911,6 +924,11 @@ func (cs *clientStub) CreateVirtualMachineSnapshot(ctx context.Context, namespac
 		CreationTime:    &creationTime,
 		Indications:     indications,
 		SnapshotVolumes: snapshotVolumes,
+	}
+
+	if cs.failSnapshot {
+		msg := "VolumeSnapshotClass not found"
+		snapshot.Status.Error = &snapshotv1alpha1.Error{Message: &msg}
 	}
 	return snapshot, nil
 }

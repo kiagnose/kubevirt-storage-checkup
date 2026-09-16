@@ -108,6 +108,10 @@ func (c *Client) CreateVirtualMachineInstanceMigration(ctx context.Context, name
 	return c.VirtualMachineInstanceMigration(namespace).Create(vmim, &metav1.CreateOptions{})
 }
 
+func (c *Client) GetVirtualMachineInstanceMigration(namespace, name string) (*kvcorev1.VirtualMachineInstanceMigration, error) {
+	return c.VirtualMachineInstanceMigration(namespace).Get(name, &metav1.GetOptions{})
+}
+
 func (c *Client) CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error) {
 	return c.CdiClient().CdiV1beta1().DataVolumes(namespace).Create(ctx, dv, metav1.CreateOptions{})
 }
