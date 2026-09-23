@@ -207,10 +207,10 @@ func (c *Checkup) Run(ctx context.Context) error {
 	if err := c.checkVMIBoot(ctx, &errStr); err != nil {
 		return err
 	}
-	if err := c.checkVMILiveMigration(ctx, &errStr); err != nil {
+	if err := c.checkVMHotplugVolume(ctx, &errStr); err != nil {
 		return err
 	}
-	if err := c.checkVMHotplugVolume(ctx, &errStr); err != nil {
+	if err := c.checkVMILiveMigration(ctx, &errStr); err != nil {
 		return err
 	}
 
@@ -965,15 +965,14 @@ func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) err
 
 	if err := c.waitForVMIStatus(ctx, vmName, "migration completed", &c.results.VMLiveMigration, errStr,
 		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
-			if ms := vmi.Status.MigrationState; ms != nil {
-				if ms.Completed {
-					return true, nil
-				}
-				if ms.Failed {
-					return false, errors.New("migration failed")
-				}
+			ms := vmi.Status.MigrationState
+			if ms == nil {
+				return false, nil
 			}
-			return false, nil
+			if ms.Failed {
+				return false, errors.New("migration failed")
+			}
+			return ms.Completed && ms.EndTimestamp != nil, nil
 		}); err != nil {
 		return err
 	}

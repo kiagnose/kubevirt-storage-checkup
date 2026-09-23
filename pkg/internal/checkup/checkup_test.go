@@ -469,8 +469,10 @@ func (cs *clientStub) CreateVirtualMachineInstanceMigration(ctx context.Context,
 	if !exist {
 		return nil, errors.NewNotFound(schema.GroupResource{Group: "kubevirt.io", Resource: "virtualmachineinstances"}, name)
 	}
+	now := metav1.Now()
 	vmi.Status.MigrationState = &kvcorev1.VirtualMachineInstanceMigrationState{
-		Completed: true,
+		Completed:    true,
+		EndTimestamp: &now,
 	}
 	if cs.failMigration {
 		vmi.Status.MigrationState = &kvcorev1.VirtualMachineInstanceMigrationState{
