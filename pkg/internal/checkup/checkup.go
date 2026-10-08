@@ -100,9 +100,8 @@ const (
 	AnnDefaultVirtStorageClass = "storageclass.kubevirt.io/is-default-virt-class"
 	AnnDefaultStorageClass     = "storageclass.kubernetes.io/is-default-class"
 
-	ErrNoDefaultStorageClass = "No default storage class found. " +
-		"Set a default StorageClass on the cluster or provide one via spec.param.storageClass"
-	ErrPvcNotBound = "PVC binding check failed: a test PVC did not bind within the timeout. " +
+	ErrNoDefaultStorageClass = "No default storage class found. Set a default StorageClass on the cluster"
+	ErrPvcNotBound           = "PVC binding check failed: a test PVC did not bind within the timeout. " +
 		"Check that the storage provisioner is healthy and the StorageClass is functional"
 	ErrMultipleDefaultStorageClasses = "Multiple default storage classes found. Ensure only one StorageClass is annotated as default"
 	ErrEmptyClaimPropertySets        = "Some StorageProfiles have empty ClaimPropertySets (unknown provisioners). " +
