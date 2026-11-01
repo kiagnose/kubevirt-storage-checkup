@@ -1,0 +1,1582 @@
+/*
+ * This file is part of the kiagnose project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Copyright 2023 Red Hat, Inc.
+ *
+ */
+
+package kubevirt
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
+
+	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
+	configv1 "github.com/openshift/api/config/v1"
+
+	kvcorev1 "kubevirt.io/api/core/v1"
+	cdiv1 "kubevirt.io/containerized-data-importer-api/pkg/apis/core/v1beta1"
+
+	snapshotv1alpha1 "kubevirt.io/api/snapshot/v1alpha1"
+
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/shared"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/status"
+)
+
+type KubeVirtStorageClient interface {
+	CreateVirtualMachine(ctx context.Context, namespace string, vm *kvcorev1.VirtualMachine) (*kvcorev1.VirtualMachine, error)
+	DeleteVirtualMachine(ctx context.Context, namespace, name string) error
+	StopVirtualMachine(ctx context.Context, namespace, name string, stopOptions *kvcorev1.StopOptions) error
+	GetVirtualMachine(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachine, error)
+	PatchVirtualMachine(ctx context.Context, namespace string, original, modified *kvcorev1.VirtualMachine) (*kvcorev1.VirtualMachine, error)
+	GetVirtualMachineInstance(ctx context.Context, namespace, name string) (*kvcorev1.VirtualMachineInstance, error)
+	CreateVirtualMachineInstanceMigration(ctx context.Context, namespace string,
+		vmim *kvcorev1.VirtualMachineInstanceMigration) (*kvcorev1.VirtualMachineInstanceMigration, error)
+	GetVirtualMachineInstanceMigration(namespace, name string) (*kvcorev1.VirtualMachineInstanceMigration, error)
+	CreateDataVolume(ctx context.Context, namespace string, dv *cdiv1.DataVolume) (*cdiv1.DataVolume, error)
+	DeleteDataVolume(ctx context.Context, namespace, name string) error
+	DeletePersistentVolumeClaim(ctx context.Context, namespace, name string) error
+	ListNodes(ctx context.Context) (*corev1.NodeList, error)
+	ListNamespaces(ctx context.Context) (*corev1.NamespaceList, error)
+	ListStorageProfiles(ctx context.Context) (*cdiv1.StorageProfileList, error)
+	ListVolumeSnapshotClasses(ctx context.Context) (*snapshotv1.VolumeSnapshotClassList, error)
+	ListDataImportCrons(ctx context.Context, namespace string) (*cdiv1.DataImportCronList, error)
+	ListVirtualMachinesInstances(ctx context.Context, namespace string) (*kvcorev1.VirtualMachineInstanceList, error)
+	ListCDIs(ctx context.Context) (*cdiv1.CDIList, error)
+	GetNamespace(ctx context.Context, name string) (*corev1.Namespace, error)
+	GetPersistentVolumeClaim(ctx context.Context, namespace, name string) (*corev1.PersistentVolumeClaim, error)
+	GetPersistentVolume(ctx context.Context, name string) (*corev1.PersistentVolume, error)
+	GetVolumeSnapshot(ctx context.Context, namespace, name string) (*snapshotv1.VolumeSnapshot, error)
+	GetCSIDriver(ctx context.Context, name string) (*storagev1.CSIDriver, error)
+	GetDataSource(ctx context.Context, namespace, name string) (*cdiv1.DataSource, error)
+	GetClusterVersion(ctx context.Context, name string) (*configv1.ClusterVersion, error)
+	CreateVirtualMachineSnapshot(ctx context.Context, namespace string,
+		snapshot *snapshotv1alpha1.VirtualMachineSnapshot) (*snapshotv1alpha1.VirtualMachineSnapshot, error)
+	GetVirtualMachineSnapshot(ctx context.Context, namespace, name string) (*snapshotv1alpha1.VirtualMachineSnapshot, error)
+	DeleteVirtualMachineSnapshot(ctx context.Context, namespace, name string) error
+	CreateVirtualMachineRestore(ctx context.Context, namespace string,
+		restore *snapshotv1alpha1.VirtualMachineRestore) (*snapshotv1alpha1.VirtualMachineRestore, error)
+	GetVirtualMachineRestore(ctx context.Context, namespace, name string) (*snapshotv1alpha1.VirtualMachineRestore, error)
+	DeleteVirtualMachineRestore(ctx context.Context, namespace, name string) error
+}
+
+const (
+	VMIUnderTestNamePrefix = "vmi-under-test"
+	hotplugVolumeName      = "hotplug-volume"
+	pvcName                = "checkup-pvc"
+	StrTrue                = "true"
+	StrFalse               = "false"
+
+	AnnDefaultVirtStorageClass = "storageclass.kubevirt.io/is-default-virt-class"
+	AnnDefaultStorageClass     = "storageclass.kubernetes.io/is-default-class"
+
+	ErrPvcNotBound = "PVC binding check failed: a test PVC did not bind within the timeout. " +
+		"Check that the storage provisioner is healthy and the StorageClass is functional"
+	ErrEmptyClaimPropertySets = "Some StorageProfiles have empty ClaimPropertySets (unknown provisioners). " +
+		"Check that all provisioners are properly configured"
+	// FIXME: need to decide of we want to return errors in this cases
+	// errMissingVolumeSnapshotClass    = "there are StorageProfiles missing VolumeSnapshotClass"
+	// errVMsWithNonVirtRbdStorageClass = "there are VMs using the plain RBD storageclass when the virtualization storageclass exists"
+	ErrVMsWithUnsetEfsStorageClass = "VMs are using an EFS StorageClass where uid/gid are not set. " +
+		"Configure uid and gid in the StorageClass parameters"
+	ErrGoldenImagesNotUpToDate = "Golden images are not up to date: DataImportCron is not current or DataSource is not ready"
+	ErrGoldenImageNoDataSource = "Golden image DataSource has no PVC or Snapshot source configured"
+	ErrBootFailedOnSomeVMs     = "Concurrent VM boot check failed: one or more VMs did not boot successfully. " +
+		"Check the logs and the concurrentVMBoot result for details"
+	MessageBootCompletedOnAllVMs     = "Boot completed on all VMs on time"
+	MessageSkipNoDefaultStorageClass = "Skipped - no default storage class"
+	MessageSkipNoGoldenImage         = "Skipped - no golden image PVC or Snapshot"
+	MessageSkipNoVMI                 = "Skipped - no VMI"
+	MessageSkipNoSnapshot            = "Skipped - no VM snapshot"
+	MessageSkipSingleNode            = "Skipped - single node"
+
+	pollInterval = 5 * time.Second
+)
+
+// Internal sentinel errors used for golden image control flow. The customer-facing
+// messages are the ErrGoldenImages* constants above; these lowercase errors satisfy
+// the Go convention (staticcheck ST1005) that error strings are not capitalized.
+var (
+	errGoldenImagesNotUpToDate = errors.New("golden images not up to date")
+	errGoldenImageNoDataSource = errors.New("golden image has no data source")
+)
+
+// UnsupportedProvisioners is a hash of provisioners which are known not to work with CDI
+var UnsupportedProvisioners = map[string]struct{}{
+	"kubernetes.io/no-provisioner": {},
+	// The following provisioners may be found in Rook/Ceph deployments and are related to object storage
+	"openshift-storage.ceph.rook.io/bucket": {},
+
+	"openshift-storage.noobaa.io/obc": {},
+}
+
+type Checkup struct {
+	client              KubeVirtStorageClient
+	state               *shared.State
+	namespace           string
+	checkupConfig       config.Config
+	defaultStorageClass string
+	goldenImageScs      []string
+	goldenImagePvc      *corev1.PersistentVolumeClaim
+	goldenImageSnap     *snapshotv1.VolumeSnapshot
+	vmUnderTest         *kvcorev1.VirtualMachine
+	results             status.Results
+}
+
+type goldenImagesCheckState struct {
+	notReadyDicNames     string
+	noDataSourceDicNames string
+	fallbackPvcDefaultSC *corev1.PersistentVolumeClaim
+	fallbackPvc          *corev1.PersistentVolumeClaim
+}
+
+func New(client KubeVirtStorageClient, namespace string, state *shared.State, checkupConfig config.Config) *Checkup {
+	return &Checkup{
+		client:        client,
+		namespace:     namespace,
+		state:         state,
+		checkupConfig: checkupConfig,
+	}
+}
+
+func (c *Checkup) Setup(ctx context.Context) error {
+	return nil
+}
+
+//nolint:gocyclo
+func (c *Checkup) Run(ctx context.Context) error {
+	errStr := ""
+
+	available, err := c.checkVersions(ctx)
+	if err != nil {
+		return err
+	}
+	if !available {
+		log.Print("Skipping KubeVirt validation: KubeVirt API or CDI installation is unavailable")
+		return nil
+	}
+	log.Print("Starting KubeVirt validation")
+
+	scs := c.state.StorageClasses
+	c.defaultStorageClass = c.state.DefaultStorageClass
+	c.results.DefaultStorageClass = c.state.DefaultStorageClass
+
+	err = c.checkPVCCreationAndBinding(ctx, &errStr)
+	if err != nil {
+		return err
+	}
+
+	sps, err := c.client.ListStorageProfiles(ctx)
+	if err != nil {
+		return err
+	}
+
+	vscs, err := c.client.ListVolumeSnapshotClasses(ctx)
+	if err != nil {
+		return err
+	}
+
+	c.checkStorageProfiles(ctx, sps, vscs, &errStr)
+	c.checkVolumeSnapShotClasses(sps, vscs, &errStr)
+
+	nss, err := c.client.ListNamespaces(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := c.checkGoldenImages(ctx, nss, &errStr); err != nil {
+		return err
+	}
+	if err := c.checkVMIs(ctx, nss, scs, &errStr); err != nil {
+		return err
+	}
+
+	if err := c.checkVMIBoot(ctx, &errStr); err != nil {
+		return err
+	}
+	if err := c.checkVMHotplugVolume(ctx, &errStr); err != nil {
+		return err
+	}
+	if err := c.checkVMILiveMigration(ctx, &errStr); err != nil {
+		return err
+	}
+
+	snapshotOK, snapErr := c.checkVMSnapshot(ctx, &errStr)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.checkVMRestore(ctx, snapshotOK, &errStr); err != nil {
+		return err
+	}
+
+	if err := c.checkConcurrentVMIBoot(ctx, &errStr); err != nil {
+		return err
+	}
+
+	if errStr != "" {
+		return errors.New(errStr)
+	}
+
+	return nil
+}
+
+func (c *Checkup) checkVersions(ctx context.Context) (bool, error) {
+	log.Print("checkVersions")
+
+	_, err := c.client.ListVirtualMachinesInstances(ctx, metav1.NamespaceAll)
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check KubeVirt API availability: %w", err)
+	}
+
+	cdis, err := c.client.ListCDIs(ctx)
+	if k8serrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check CDI availability: %w", err)
+	}
+	if len(cdis.Items) == 0 {
+		return false, nil
+	}
+	if len(cdis.Items) != 1 {
+		return false, errors.New("expecting single CDI instance in cluster")
+	}
+
+	ocpVersion := ""
+	ver, err := c.client.GetClusterVersion(ctx, "version")
+	if err != nil {
+		log.Printf(
+			"OpenShift ClusterVersion not available (non-OpenShift cluster): %v",
+			err,
+		)
+	} else {
+		for _, update := range ver.Status.History {
+			if update.State == configv1.CompletedUpdate {
+				ocpVersion = update.Version
+				break
+			}
+		}
+	}
+
+	cnvVersion := cdis.Items[0].Labels["app.kubernetes.io/version"]
+
+	log.Printf("OCP version: %s, CNV version: %s", ocpVersion, cnvVersion)
+
+	c.results.OCPVersion = ocpVersion
+	c.results.CNVVersion = cnvVersion
+
+	return true, nil
+}
+
+// FIXME: allow providing specific golden image namespace in the config, instead of scanning all namespaces
+func (c *Checkup) checkGoldenImages(ctx context.Context, namespaces *corev1.NamespaceList, errStr *string) error {
+	log.Print("checkGoldenImages")
+
+	const defaultGoldenImagesNamespace = "openshift-virtualization-os-images"
+	var cs goldenImagesCheckState
+
+	if ns, err := c.client.GetNamespace(ctx, defaultGoldenImagesNamespace); err == nil {
+		if err := c.checkDataImportCrons(ctx, ns.Name, &cs); err != nil {
+			return err
+		}
+	}
+
+	for i := range namespaces.Items {
+		if ns := namespaces.Items[i].Name; ns != defaultGoldenImagesNamespace {
+			if err := c.checkDataImportCrons(ctx, ns, &cs); err != nil {
+				return err
+			}
+		}
+	}
+
+	if c.goldenImagePvc == nil {
+		if cs.fallbackPvcDefaultSC != nil {
+			c.goldenImagePvc = cs.fallbackPvcDefaultSC
+		} else if cs.fallbackPvc != nil {
+			c.goldenImagePvc = cs.fallbackPvc
+		}
+	}
+
+	if pvc := c.goldenImagePvc; pvc != nil {
+		log.Printf("Selected golden image PVC: %s/%s %s %s %s", pvc.Namespace, pvc.Name, *pvc.Spec.VolumeMode,
+			pvc.Status.AccessModes[0], *pvc.Spec.StorageClassName)
+	} else if snap := c.goldenImageSnap; snap != nil {
+		log.Printf("Selected golden image Snapshot: %s/%s", snap.Namespace, snap.Name)
+	} else {
+		log.Print("No golden image PVC or Snapshot found")
+	}
+
+	if cs.notReadyDicNames != "" {
+		c.results.GoldenImagesNotUpToDate = cs.notReadyDicNames
+		appendSep(errStr, ErrGoldenImagesNotUpToDate)
+	}
+	if cs.noDataSourceDicNames != "" {
+		c.results.GoldenImagesNoDataSource = cs.noDataSourceDicNames
+		appendSep(errStr, ErrGoldenImageNoDataSource)
+	}
+	return nil
+}
+
+func (c *Checkup) checkDataImportCrons(ctx context.Context, namespace string, cs *goldenImagesCheckState) error {
+	dics, err := c.client.ListDataImportCrons(ctx, namespace)
+	if err != nil {
+		return err
+	}
+
+	sort.Slice(dics.Items, func(i, j int) bool {
+		iTS := dics.Items[i].Status.LastImportTimestamp
+		jTS := dics.Items[j].Status.LastImportTimestamp
+		if iTS != nil && jTS != nil {
+			return iTS.After(jTS.Time)
+		}
+		return iTS != nil && jTS == nil
+	})
+
+	for i := range dics.Items {
+		dic := &dics.Items[i]
+		pvc, snap, err := c.getGoldenImage(ctx, dic)
+		if err != nil {
+			if errors.Is(err, errGoldenImageNoDataSource) {
+				appendSep(&cs.noDataSourceDicNames, dic.Namespace+"/"+dic.Name)
+				continue
+			} else if errors.Is(err, errGoldenImagesNotUpToDate) {
+				appendSep(&cs.notReadyDicNames, dic.Namespace+"/"+dic.Name)
+				continue
+			}
+			return err
+		}
+
+		c.updateGoldenImageSnapshot(snap)
+		c.updateGoldenImagePvc(pvc, cs)
+	}
+
+	return nil
+}
+
+func (c *Checkup) getGoldenImage(ctx context.Context, dic *cdiv1.DataImportCron) (
+	*corev1.PersistentVolumeClaim, *snapshotv1.VolumeSnapshot, error) {
+	if !isDataImportCronUpToDate(dic.Status.Conditions) {
+		return nil, nil, errGoldenImagesNotUpToDate
+	}
+	das, err := c.client.GetDataSource(ctx, dic.Namespace, dic.Spec.ManagedDataSource)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !isDataSourceReady(das.Status.Conditions) {
+		return nil, nil, errGoldenImagesNotUpToDate
+	}
+
+	if srcPvc := das.Spec.Source.PVC; srcPvc != nil {
+		pvc, err := c.client.GetPersistentVolumeClaim(ctx, srcPvc.Namespace, srcPvc.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return pvc, nil, nil
+	}
+	if srcSnap := das.Spec.Source.Snapshot; srcSnap != nil {
+		snap, err := c.client.GetVolumeSnapshot(ctx, srcSnap.Namespace, srcSnap.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, snap, nil
+	}
+
+	return nil, nil, errGoldenImageNoDataSource
+}
+
+func isDataImportCronUpToDate(conditions []cdiv1.DataImportCronCondition) bool {
+	for i := range conditions {
+		cond := conditions[i]
+		if cond.Type == cdiv1.DataImportCronUpToDate && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func isDataSourceReady(conditions []cdiv1.DataSourceCondition) bool {
+	for i := range conditions {
+		cond := conditions[i]
+		if cond.Type == cdiv1.DataSourceReady && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checkup) updateGoldenImagePvc(pvc *corev1.PersistentVolumeClaim, cs *goldenImagesCheckState) {
+	if pvc == nil {
+		return
+	}
+
+	// Prefer golden image with configured/default storage class
+	if c.goldenImagePvc != nil {
+		sc := c.goldenImagePvc.Spec.StorageClassName
+		if sc == nil {
+			return
+		}
+		if *sc == c.results.DefaultStorageClass ||
+			(c.checkupConfig.StorageClass != "" && *sc == c.checkupConfig.StorageClass) {
+			return
+		}
+	}
+
+	sc := pvc.Spec.StorageClassName
+	if sc != nil && contains(c.goldenImageScs, *sc) {
+		c.goldenImagePvc = pvc
+	} else if cs.fallbackPvcDefaultSC == nil && (sc == nil || *sc == c.results.DefaultStorageClass) {
+		cs.fallbackPvcDefaultSC = pvc
+	} else if cs.fallbackPvc == nil {
+		cs.fallbackPvc = pvc
+	}
+}
+
+func (c *Checkup) updateGoldenImageSnapshot(snap *snapshotv1.VolumeSnapshot) {
+	if snap != nil && c.goldenImageSnap == nil {
+		c.goldenImageSnap = snap
+	}
+}
+
+func (c *Checkup) checkPVCCreationAndBinding(ctx context.Context, errStr *string) error {
+	log.Print("checkPVCCreationAndBinding")
+
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.PVCBound = MessageSkipNoDefaultStorageClass
+		return nil
+	}
+
+	dv := &cdiv1.DataVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: pvcName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       c.checkupConfig.PodName,
+				UID:        types.UID(c.checkupConfig.PodUID),
+			}},
+			Annotations: map[string]string{
+				"cdi.kubevirt.io/storage.bind.immediate.requested": StrTrue,
+			},
+		},
+		Spec: cdiv1.DataVolumeSpec{
+			Storage: &cdiv1.StorageSpec{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse("10Mi"),
+					},
+				},
+			},
+			Source: &cdiv1.DataVolumeSource{
+				Blank: &cdiv1.DataVolumeBlankImage{},
+			},
+		},
+	}
+
+	if sc := c.checkupConfig.StorageClass; sc != "" {
+		log.Printf("PVC storage class %q", sc)
+		dv.Spec.Storage.StorageClassName = &sc
+	}
+
+	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {
+		return err
+	}
+
+	c.waitForPVCBound(ctx, &c.results.PVCBound, errStr)
+
+	return c.client.DeleteDataVolume(ctx, c.namespace, pvcName)
+}
+
+func (c *Checkup) waitForPVCBound(ctx context.Context, result, errStr *string) {
+	conditionFn := func(ctx context.Context) (bool, error) {
+		pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, pvcName)
+		if err != nil {
+			return false, ignoreNotFound(err)
+		}
+		return pvc.Status.Phase == corev1.ClaimBound, nil
+	}
+
+	log.Printf("Waiting for PVC %q bound", pvcName)
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, time.Minute, conditionFn); err != nil {
+		log.Printf("PVC %q failed to bound", pvcName)
+		appendSep(result, ErrPvcNotBound)
+		appendSep(errStr, ErrPvcNotBound)
+		return
+	}
+
+	res := fmt.Sprintf("PVC %q bound", pvcName)
+	log.Print(res)
+	appendSep(result, res)
+}
+
+func (c *Checkup) hasSmartClone(ctx context.Context, sp *cdiv1.StorageProfile, vscs *snapshotv1.VolumeSnapshotClassList) bool {
+	strategy := sp.Status.CloneStrategy
+	provisioner := sp.Status.Provisioner
+
+	if strategy != nil {
+		if *strategy == cdiv1.CloneStrategyHostAssisted {
+			return false
+		}
+		if *strategy == cdiv1.CloneStrategyCsiClone && provisioner != nil {
+			_, err := c.client.GetCSIDriver(ctx, *provisioner)
+			return err == nil
+		}
+	}
+
+	if (strategy == nil || *strategy == cdiv1.CloneStrategySnapshot) && provisioner != nil {
+		return hasDriver(vscs, *provisioner)
+	}
+
+	return false
+}
+
+func (c *Checkup) checkStorageProfiles(ctx context.Context, sps *cdiv1.StorageProfileList,
+	vscs *snapshotv1.VolumeSnapshotClassList, errStr *string) {
+	spWithEmptyClaimPropertySets := ""
+	spWithSpecClaimPropertySets := ""
+	spWithSmartClone := ""
+	spWithRWX := ""
+
+	log.Print("checkStorageProfiles")
+	for i := range sps.Items {
+		sp := &sps.Items[i]
+		provisioner := sp.Status.Provisioner
+		if provisioner == nil || unsupportedProvisioner(*provisioner) {
+			continue
+		}
+
+		sc := sp.Status.StorageClass
+		hasSmartClone := c.hasSmartClone(ctx, sp, vscs)
+		hasRWX := hasRWX(sp.Status.ClaimPropertySets)
+		if sc != nil && hasSmartClone && hasRWX {
+			c.goldenImageScs = append(c.goldenImageScs, *sc)
+		}
+
+		if len(sp.Status.ClaimPropertySets) == 0 {
+			appendSep(&spWithEmptyClaimPropertySets, sp.Name)
+		}
+		if len(sp.Spec.ClaimPropertySets) != 0 {
+			appendSep(&spWithSpecClaimPropertySets, sp.Name)
+		}
+		if hasSmartClone {
+			appendSep(&spWithSmartClone, sp.Name)
+		}
+		if hasRWX {
+			appendSep(&spWithRWX, sp.Name)
+		}
+	}
+
+	if spWithEmptyClaimPropertySets != "" {
+		c.results.StorageProfilesWithEmptyClaimPropertySets = spWithEmptyClaimPropertySets
+		appendSep(errStr, ErrEmptyClaimPropertySets)
+	}
+	if spWithSpecClaimPropertySets != "" {
+		c.results.StorageProfilesWithSpecClaimPropertySets = spWithSpecClaimPropertySets
+	}
+	if spWithSmartClone != "" {
+		c.results.StorageProfilesWithSmartClone = spWithSmartClone
+	}
+	if spWithRWX != "" {
+		c.results.StorageProfilesWithRWX = spWithRWX
+	}
+}
+
+func hasRWX(cpSets []cdiv1.ClaimPropertySet) bool {
+	for i := range cpSets {
+		cpSet := cpSets[i]
+		for i := range cpSet.AccessModes {
+			am := cpSet.AccessModes[i]
+			if am == corev1.ReadWriteMany {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (c *Checkup) checkVolumeSnapShotClasses(sps *cdiv1.StorageProfileList, vscs *snapshotv1.VolumeSnapshotClassList, _ *string) {
+	log.Print("checkVolumeSnapShotClasses")
+
+	spNames := ""
+	for i := range sps.Items {
+		sp := sps.Items[i]
+		strategy := sp.Status.CloneStrategy
+		provisioner := sp.Status.Provisioner
+		if (strategy == nil || *strategy == cdiv1.CloneStrategySnapshot) &&
+			provisioner != nil && !unsupportedProvisioner(*provisioner) &&
+			!hasDriver(vscs, *provisioner) {
+			appendSep(&spNames, sp.Name)
+		}
+	}
+	if spNames != "" {
+		c.results.StorageProfileMissingVolumeSnapshotClass = spNames
+		// FIXME: not sure the checkup should fail on this one
+		// appendSep(errStr, errMissingVolumeSnapshotClass)
+	}
+}
+
+func unsupportedProvisioner(provisioner string) bool {
+	_, ok := UnsupportedProvisioners[provisioner]
+	return ok
+}
+
+func hasDriver(vscs *snapshotv1.VolumeSnapshotClassList, driver string) bool {
+	for i := range vscs.Items {
+		vsc := vscs.Items[i]
+		if vsc.Driver == driver {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Checkup) checkVMIs(ctx context.Context, namespaces *corev1.NamespaceList, scs *storagev1.StorageClassList, errStr *string) error {
+	var vmisWithNonVirtRbdSC, vmisWithUnsetEfsSC string
+
+	log.Print("checkVMIs")
+	virtSC, err := c.getVirtStorageClass(scs)
+	if err != nil {
+		return err
+	}
+	unsetEfsSC, err := c.getUnsetEfsStorageClass(scs)
+	if err != nil {
+		return err
+	}
+	if virtSC == nil && unsetEfsSC == nil {
+		return nil
+	}
+
+	for i := range namespaces.Items {
+		ns := namespaces.Items[i]
+		vmis, err := c.client.ListVirtualMachinesInstances(ctx, ns.Name)
+		if err != nil {
+			return fmt.Errorf("failed ListVirtualMachinesInstances: %s", err)
+		}
+		for i := range vmis.Items {
+			vmi := vmis.Items[i]
+			if vmi.Status.Phase != kvcorev1.Running {
+				continue
+			}
+
+			hasNonVirtRbdSC, hasUnsetEfsSC, err := c.checkVMIVolumes(ctx, &vmi, virtSC, unsetEfsSC)
+			if err != nil {
+				return err
+			}
+			if hasNonVirtRbdSC {
+				appendSep(&vmisWithNonVirtRbdSC, vmi.Namespace+"/"+vmi.Name)
+			}
+			if hasUnsetEfsSC {
+				appendSep(&vmisWithUnsetEfsSC, vmi.Namespace+"/"+vmi.Name)
+			}
+		}
+	}
+
+	if vmisWithNonVirtRbdSC != "" {
+		c.results.VMsWithNonVirtRbdStorageClass = vmisWithNonVirtRbdSC
+		// FIXME: not sure the checkup should fail on this one
+		// appendSep(errStr, errVMsWithNonVirtRbdStorageClass)
+	}
+	if vmisWithUnsetEfsSC != "" {
+		c.results.VMsWithUnsetEfsStorageClass = vmisWithUnsetEfsSC
+		appendSep(errStr, ErrVMsWithUnsetEfsStorageClass)
+	}
+
+	return nil
+}
+
+func (c *Checkup) getVirtStorageClass(scs *storagev1.StorageClassList) (*string, error) {
+	var virtSC *string
+
+	hasVirtParams := func(sc *storagev1.StorageClass) bool {
+		return strings.Contains(sc.Provisioner, "rbd.csi.ceph.com") &&
+			sc.Parameters["mounter"] == "rbd" &&
+			sc.Parameters["mapOptions"] == "krbd:rxbounce"
+	}
+
+	// First look for SC named with virtualization suffix
+	for i := range scs.Items {
+		sc := &scs.Items[i]
+		if strings.HasSuffix(sc.Name, "-ceph-rbd-virtualization") {
+			if virtSC != nil {
+				return nil, errors.New("multiple virt StorageClasses")
+			}
+			if hasVirtParams(sc) {
+				virtSC = &sc.Name
+			}
+		}
+	}
+
+	if virtSC != nil {
+		return virtSC, nil
+	}
+
+	// If virt SC not found, look for one with virt params
+	for i := range scs.Items {
+		sc := &scs.Items[i]
+		if hasVirtParams(sc) {
+			if virtSC != nil {
+				return nil, errors.New("multiple virt StorageClasses")
+			}
+			virtSC = &sc.Name
+		}
+	}
+
+	return virtSC, nil
+}
+
+func (c *Checkup) getUnsetEfsStorageClass(scs *storagev1.StorageClassList) (*string, error) {
+	var unsetEfsSC *string
+	for i := range scs.Items {
+		sc := scs.Items[i]
+		if strings.Contains(sc.Provisioner, "efs.csi.aws.com") &&
+			(sc.Parameters["uid"] == "" || sc.Parameters["gid"] == "") {
+			if unsetEfsSC != nil {
+				return nil, errors.New("multiple unset EFS StorageClasses")
+			}
+			unsetEfsSC = &sc.Name
+		}
+	}
+	return unsetEfsSC, nil
+}
+
+func (c *Checkup) checkVMIVolumes(ctx context.Context, vmi *kvcorev1.VirtualMachineInstance, virtSC, unsetEfsSC *string) (
+	hasNonVirtRbdSC bool, hasUnsetEfsSC bool, err error) {
+	vols := vmi.Spec.Volumes
+	for i := range vols {
+		var pv *corev1.PersistentVolume
+		pv, err = c.getVolumePV(ctx, vols[i], vmi.Namespace)
+		if err != nil || pv == nil {
+			return
+		}
+		if !hasNonVirtRbdSC && pvHasNonVirtRbdStorageClass(pv, virtSC) {
+			hasNonVirtRbdSC = true
+		}
+		if !hasUnsetEfsSC && pvHasUnsetEfsStorageClass(pv, unsetEfsSC) {
+			hasUnsetEfsSC = true
+		}
+	}
+	return
+}
+
+func (c *Checkup) getVolumePV(ctx context.Context, vol kvcorev1.Volume, namespace string) (*corev1.PersistentVolume, error) {
+	pvcName := ""
+	if pvc := vol.PersistentVolumeClaim; pvc != nil {
+		pvcName = pvc.ClaimName
+	} else if dv := vol.DataVolume; dv != nil {
+		pvcName = dv.Name
+	} else {
+		return nil, nil
+	}
+	pvc, err := c.client.GetPersistentVolumeClaim(ctx, namespace, pvcName)
+	if err != nil {
+		return nil, fmt.Errorf("failed GetPersistentVolumeClaim: %s", err)
+	}
+	pv, err := c.client.GetPersistentVolume(ctx, pvc.Spec.VolumeName)
+	if err != nil {
+		return nil, fmt.Errorf("failed GetPersistentVolume: %s", err)
+	}
+	return pv, nil
+}
+
+func pvHasNonVirtRbdStorageClass(pv *corev1.PersistentVolume, virtSC *string) bool {
+	return virtSC != nil && pv.Spec.CSI != nil &&
+		strings.Contains(pv.Spec.CSI.Driver, "rbd.csi.ceph.com") &&
+		pv.Spec.StorageClassName != *virtSC
+}
+
+func pvHasUnsetEfsStorageClass(pv *corev1.PersistentVolume, unsetEfsSC *string) bool {
+	return unsetEfsSC != nil && pv.Spec.CSI != nil &&
+		pv.Spec.CSI.Driver == "efs.csi.aws.com" &&
+		pv.Spec.StorageClassName == *unsetEfsSC
+}
+
+func (c *Checkup) Teardown(ctx context.Context) error {
+	if c.vmUnderTest == nil {
+		return nil
+	}
+	var errs []error
+	appendTeardownErr := func(action, name string, err error) {
+		if err = ignoreNotFound(err); err != nil {
+			errs = append(errs, fmt.Errorf("%s %q: %w", action, name, err))
+		}
+	}
+
+	appendTeardownErr("delete restore", c.restoreName(),
+		c.client.DeleteVirtualMachineRestore(ctx, c.namespace, c.restoreName()))
+	appendTeardownErr("delete snapshot", c.snapshotName(),
+		c.client.DeleteVirtualMachineSnapshot(ctx, c.namespace, c.snapshotName()))
+	appendTeardownErr("delete VM", c.vmUnderTest.Name,
+		c.client.DeleteVirtualMachine(ctx, c.namespace, c.vmUnderTest.Name))
+	appendTeardownErr("delete DataVolume", hotplugVolumeName,
+		c.client.DeleteDataVolume(ctx, c.namespace, hotplugVolumeName))
+	appendTeardownErr("delete PVC", hotplugVolumeName,
+		c.client.DeletePersistentVolumeClaim(ctx, c.namespace, hotplugVolumeName))
+
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("teardown: %w", err)
+	}
+	return nil
+}
+
+func (c *Checkup) Results() status.Results {
+	return c.results
+}
+
+func (c *Checkup) Config() config.Config {
+	return c.checkupConfig
+}
+
+func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
+	log.Print("checkVMIBoot")
+
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.VMBootFromGoldenImage = MessageSkipNoDefaultStorageClass
+		return nil
+	}
+
+	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
+		log.Print(MessageSkipNoGoldenImage)
+		c.results.VMBootFromGoldenImage = MessageSkipNoGoldenImage
+		return nil
+	}
+
+	vmName := uniqueVMName()
+	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, c.checkupConfig.NumOfDataVolumes)
+	log.Printf("Creating VM %q", vmName)
+	if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, c.vmUnderTest); err != nil {
+		return fmt.Errorf("failed to create VM: %w", err)
+	}
+
+	if err := c.waitForVMIBoot(ctx, vmName, &c.results.VMBootFromGoldenImage, errStr); err != nil {
+		return err
+	}
+
+	if c.goldenImageSnap != nil {
+		c.results.VMVolumeClone = "DV cloneType: snapshot"
+		return nil
+	}
+
+	pvc, err := c.client.GetPersistentVolumeClaim(ctx, c.namespace, getVMDvName(vmName))
+	if err != nil {
+		return err
+	}
+	cloneType := pvc.Annotations["cdi.kubevirt.io/cloneType"]
+	c.results.VMVolumeClone = fmt.Sprintf("DV cloneType: %q", cloneType)
+	log.Print(c.results.VMVolumeClone)
+	if cloneType != "snapshot" && cloneType != "csi-clone" {
+		if reason := pvc.Annotations["cdi.kubevirt.io/cloneFallbackReason"]; reason != "" {
+			cloneFallbackReason := fmt.Sprintf("DV clone fallback reason: %s", reason)
+			log.Print(cloneFallbackReason)
+			appendSep(&c.results.VMVolumeClone, cloneFallbackReason)
+			appendSep(errStr, cloneFallbackReason)
+		}
+	}
+
+	return nil
+}
+
+func (c *Checkup) checkVMILiveMigration(ctx context.Context, errStr *string) error {
+	log.Print("checkVMILiveMigration")
+
+	skipReason, err := c.migrationSkipReason(ctx)
+	if err != nil {
+		return err
+	}
+	if skipReason != "" {
+		log.Print(skipReason)
+		c.results.VMLiveMigration = skipReason
+		return nil
+	}
+
+	vmName := c.vmUnderTest.Name
+	vmim := &kvcorev1.VirtualMachineInstanceMigration{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       kvcorev1.VirtualMachineInstanceGroupVersionKind.Kind,
+			APIVersion: kvcorev1.GroupVersion.String(),
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "vmim",
+		},
+		Spec: kvcorev1.VirtualMachineInstanceMigrationSpec{
+			VMIName: vmName,
+		},
+	}
+
+	if _, err := c.client.CreateVirtualMachineInstanceMigration(ctx, c.namespace, vmim); err != nil {
+		return fmt.Errorf("failed to create VMI LiveMigration: %w", err)
+	}
+
+	if err := c.waitForVMIStatus(ctx, vmName, "migration completed", &c.results.VMLiveMigration, errStr,
+		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
+			ms := vmi.Status.MigrationState
+			if ms == nil {
+				return false, nil
+			}
+			if ms.Failed {
+				return false, c.migrationFailure(vmim.Name)
+			}
+			return ms.Completed && ms.EndTimestamp != nil, nil
+		}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// migrationSkipReason returns a non-empty message explaining why live migration cannot be tested, or "" when the test should run.
+func (c *Checkup) migrationSkipReason(ctx context.Context) (string, error) {
+	if c.vmUnderTest == nil {
+		return MessageSkipNoVMI, nil
+	}
+
+	nodes, err := c.client.ListNodes(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(nodes.Items) == 1 {
+		return MessageSkipSingleNode, nil
+	}
+
+	vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, c.vmUnderTest.Name)
+	if err != nil {
+		return "", err
+	}
+	for i := range vmi.Status.Conditions {
+		cond := vmi.Status.Conditions[i]
+		if cond.Type == kvcorev1.VirtualMachineInstanceIsMigratable && cond.Status == corev1.ConditionFalse {
+			return cond.Message, nil
+		}
+	}
+
+	return "", nil
+}
+
+// migrationFailure returns an error explaining why the migration failed.
+func (c *Checkup) migrationFailure(name string) error {
+	vmim, err := c.client.GetVirtualMachineInstanceMigration(c.namespace, name)
+	if err != nil {
+		return fmt.Errorf("migration failed (could not read reason: %w)", err)
+	}
+
+	var reasons string
+	for i := range vmim.Status.Conditions {
+		cond := vmim.Status.Conditions[i]
+		if cond.Status == corev1.ConditionTrue && cond.Message != "" {
+			appendSep(&reasons, cond.Message)
+		}
+	}
+	if reasons != "" {
+		return fmt.Errorf("migration failed: %s", reasons)
+	}
+
+	return errors.New("migration failed")
+}
+
+func (c *Checkup) checkVMHotplugVolume(ctx context.Context, errStr *string) error {
+	log.Print("checkVMHotplugVolume")
+
+	if c.vmUnderTest == nil {
+		log.Print(MessageSkipNoVMI)
+		c.results.VMHotplugVolume = MessageSkipNoVMI
+		return nil
+	}
+
+	dv := &cdiv1.DataVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: hotplugVolumeName,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "v1",
+				Kind:       "Pod",
+				Name:       c.checkupConfig.PodName,
+				UID:        types.UID(c.checkupConfig.PodUID),
+			}},
+		},
+		Spec: c.vmUnderTest.Spec.DataVolumeTemplates[0].Spec,
+	}
+
+	if _, err := c.client.CreateDataVolume(ctx, c.namespace, dv); err != nil {
+		return err
+	}
+
+	vmName := c.vmUnderTest.Name
+	if err := c.hotplugVolume(ctx, vmName, hotplugVolumeName); err != nil {
+		return err
+	}
+
+	if err := c.waitForVMIStatus(ctx, vmName, "hotplug volume ready", &c.results.VMHotplugVolume, errStr,
+		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
+			for i := range vmi.Status.VolumeStatus {
+				vs := vmi.Status.VolumeStatus[i]
+				// Assuming single HotplugVolume
+				if vs.HotplugVolume != nil {
+					return vs.Phase == kvcorev1.VolumeReady, nil
+				}
+			}
+			return false, nil
+		}); err != nil {
+		return err
+	}
+
+	if err := c.unplugVolume(ctx, vmName, hotplugVolumeName); err != nil {
+		return err
+	}
+
+	if err := c.waitForVMIStatus(ctx, vmName, "hotplug volume removed", &c.results.VMHotplugVolume, errStr,
+		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
+			for i := range vmi.Status.VolumeStatus {
+				vs := vmi.Status.VolumeStatus[i]
+				if vs.HotplugVolume != nil {
+					return false, nil
+				}
+			}
+			return true, nil
+		}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Checkup) hotplugVolume(ctx context.Context, vmName, volumeName string) error {
+	vm, err := c.client.GetVirtualMachine(ctx, c.namespace, vmName)
+	if err != nil {
+		return err
+	}
+	original := vm.DeepCopy()
+
+	volume := kvcorev1.Volume{
+		Name: volumeName,
+		VolumeSource: kvcorev1.VolumeSource{
+			DataVolume: &kvcorev1.DataVolumeSource{
+				Name:         volumeName,
+				Hotpluggable: true,
+			},
+		},
+	}
+	disk := kvcorev1.Disk{
+		Name: volumeName,
+		DiskDevice: kvcorev1.DiskDevice{
+			Disk: &kvcorev1.DiskTarget{
+				Bus: kvcorev1.DiskBusSCSI,
+			},
+		},
+	}
+
+	vm.Spec.Template.Spec.Volumes = append(vm.Spec.Template.Spec.Volumes, volume)
+	vm.Spec.Template.Spec.Domain.Devices.Disks = append(vm.Spec.Template.Spec.Domain.Devices.Disks, disk)
+
+	_, err = c.client.PatchVirtualMachine(ctx, c.namespace, original, vm)
+	return err
+}
+
+func (c *Checkup) unplugVolume(ctx context.Context, vmName, volumeName string) error {
+	vm, err := c.client.GetVirtualMachine(ctx, c.namespace, vmName)
+	if err != nil {
+		return err
+	}
+	original := vm.DeepCopy()
+
+	filteredVolumes := make([]kvcorev1.Volume, 0, len(vm.Spec.Template.Spec.Volumes))
+	for _, vol := range vm.Spec.Template.Spec.Volumes {
+		if vol.Name != volumeName {
+			filteredVolumes = append(filteredVolumes, vol)
+		}
+	}
+	vm.Spec.Template.Spec.Volumes = filteredVolumes
+
+	filteredDisks := make([]kvcorev1.Disk, 0, len(vm.Spec.Template.Spec.Domain.Devices.Disks))
+	for _, disk := range vm.Spec.Template.Spec.Domain.Devices.Disks {
+		if disk.Name != volumeName {
+			filteredDisks = append(filteredDisks, disk)
+		}
+	}
+	vm.Spec.Template.Spec.Domain.Devices.Disks = filteredDisks
+
+	_, err = c.client.PatchVirtualMachine(ctx, c.namespace, original, vm)
+	return err
+}
+
+func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) error {
+	numOfVMs := c.checkupConfig.NumOfVMs
+	log.Printf("checkConcurrentVMIBoot numOfVMs:%d", numOfVMs)
+
+	if c.defaultStorageClass == "" && c.checkupConfig.StorageClass == "" {
+		log.Print(MessageSkipNoDefaultStorageClass)
+		c.results.ConcurrentVMBoot = MessageSkipNoDefaultStorageClass
+		return nil
+	}
+
+	if c.goldenImagePvc == nil && c.goldenImageSnap == nil {
+		log.Print(MessageSkipNoGoldenImage)
+		c.results.ConcurrentVMBoot = MessageSkipNoGoldenImage
+		return nil
+	}
+
+	var wg sync.WaitGroup
+	reasons := make(chan string, numOfVMs)
+
+	for i := 0; i < numOfVMs; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			vmName := uniqueVMName()
+			log.Printf("Creating VM %q", vmName)
+
+			vm := newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, max(c.checkupConfig.NumOfDataVolumes, 1))
+			if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, vm); err != nil {
+				log.Printf("failed to create VM %q: %s", vmName, err)
+				reasons <- fmt.Sprintf("%s: %v", vmName, err)
+				return
+			}
+
+			defer func() {
+				if err := c.client.DeleteVirtualMachine(ctx, c.namespace, vmName); err != nil {
+					log.Printf("failed to delete VM %q: %s", vmName, err)
+				}
+			}()
+
+			var result, errs string
+			if err := c.waitForVMIBoot(ctx, vmName, &result, &errs); err != nil || errs != "" {
+				log.Printf("failed waiting for VM boot %q", vmName)
+				reasons <- fmt.Sprintf("%s: %s", vmName, errs)
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(reasons)
+	var failed []string
+	for r := range reasons {
+		failed = append(failed, r)
+	}
+	if len(failed) > 0 {
+		res := fmt.Sprintf("%s: %s", ErrBootFailedOnSomeVMs, strings.Join(failed, ", "))
+		log.Print(res)
+		c.results.ConcurrentVMBoot = res
+		appendSep(errStr, res)
+		return nil
+	}
+
+	log.Print(MessageBootCompletedOnAllVMs)
+	c.results.ConcurrentVMBoot = MessageBootCompletedOnAllVMs
+
+	return nil
+}
+
+func (c *Checkup) waitForVMIBoot(ctx context.Context, vmName string, result, errStr *string) error {
+	return c.waitForVMIStatus(ctx, vmName, "successfully booted", result, errStr,
+		func(vmi *kvcorev1.VirtualMachineInstance) (done bool, err error) {
+			for i := range vmi.Status.Conditions {
+				condition := vmi.Status.Conditions[i]
+				if condition.Type == kvcorev1.VirtualMachineInstanceAgentConnected && condition.Status == corev1.ConditionTrue {
+					return true, nil
+				}
+			}
+			return false, nil
+		})
+}
+
+func uniqueVMName() string {
+	const randomStringLen = 5
+	return fmt.Sprintf("%s-%s", VMIUnderTestNamePrefix, rand.String(randomStringLen))
+}
+
+type checkVMIStatusFn func(*kvcorev1.VirtualMachineInstance) (done bool, err error)
+
+func (c *Checkup) waitForVMIStatus(ctx context.Context, vmName, checkMsg string, result, errStr *string,
+	checkVMIStatus checkVMIStatusFn) error {
+	conditionFn := func(ctx context.Context) (bool, error) {
+		vmi, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, vmName)
+		if err != nil {
+			return false, ignoreNotFound(err)
+		}
+		return checkVMIStatus(vmi)
+	}
+
+	log.Printf("Waiting for VMI %q to reach: %s", vmName, checkMsg)
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, conditionFn); err != nil {
+		res := fmt.Sprintf("failed waiting for VMI %q %s: %v", vmName, checkMsg, err)
+		log.Print(res)
+		appendSep(result, res)
+		appendSep(errStr, res)
+		return nil
+	}
+	res := fmt.Sprintf("VMI %q %s", vmName, checkMsg)
+	log.Print(res)
+	appendSep(result, res)
+
+	return nil
+}
+
+func (c *Checkup) reportVMSnapshotFailure(res string, errStr *string) {
+	log.Print(res)
+	appendSep(&c.results.VMSnapshot, res)
+	appendSep(errStr, res)
+}
+
+func (c *Checkup) waitForVMSnapshotReady(ctx context.Context, errStr *string) (bool, time.Duration) {
+	waitStart := time.Now()
+	log.Printf("Waiting for VMSnapshot %q ready (started at %s)", c.snapshotName(), waitStart.Format(time.RFC3339))
+	err := wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, func(ctx context.Context) (bool, error) {
+		snapshot, err := c.client.GetVirtualMachineSnapshot(ctx, c.namespace, c.snapshotName())
+		if err != nil {
+			return false, ignoreNotFound(err)
+		}
+		if snapshot.Status != nil && snapshot.Status.ReadyToUse != nil && *snapshot.Status.ReadyToUse {
+			return true, nil
+		}
+		if snapshot.Status != nil && snapshot.Status.Phase == snapshotv1alpha1.Failed {
+			if snapshot.Status.Error != nil && snapshot.Status.Error.Message != nil {
+				return false, fmt.Errorf("snapshot failed: %s", *snapshot.Status.Error.Message)
+			}
+			return false, errors.New("snapshot failed")
+		}
+		return false, nil
+	})
+	elapsed := time.Since(waitStart).Round(time.Millisecond)
+	if err != nil {
+		c.reportVMSnapshotFailure(
+			fmt.Sprintf("failed waiting for VMSnapshot %q after %s: %v", c.snapshotName(), elapsed, err),
+			errStr,
+		)
+		return false, 0
+	}
+	log.Printf("VMSnapshot %q ReadyToUse after %s", c.snapshotName(), elapsed)
+	return true, elapsed
+}
+
+func (c *Checkup) validateVMSnapshot(snapshot *snapshotv1alpha1.VirtualMachineSnapshot, errStr *string) bool {
+	if snapshot.Status == nil || snapshot.Status.Phase != snapshotv1alpha1.Succeeded {
+		phase := "has no status"
+		if snapshot.Status != nil {
+			phase = string(snapshot.Status.Phase)
+		}
+		c.reportVMSnapshotFailure(fmt.Sprintf("VMSnapshot %q phase is %s, expected Succeeded", c.snapshotName(), phase), errStr)
+		return false
+	}
+
+	actual := sets.New[snapshotv1alpha1.Indication](snapshot.Status.Indications...)
+	indicationsWithGA := sets.New(
+		snapshotv1alpha1.VMSnapshotOnlineSnapshotIndication,
+		snapshotv1alpha1.VMSnapshotGuestAgentIndication,
+	)
+	indicationsWithoutGA := sets.New(
+		snapshotv1alpha1.VMSnapshotOnlineSnapshotIndication,
+		snapshotv1alpha1.VMSnapshotNoGuestAgentIndication,
+	)
+	if !actual.Equal(indicationsWithGA) && !actual.Equal(indicationsWithoutGA) {
+		c.reportVMSnapshotFailure(
+			fmt.Sprintf("VMSnapshot %q indications %v do not equal expected %v or %v",
+				c.snapshotName(), sets.List(actual), sets.List(indicationsWithGA), sets.List(indicationsWithoutGA)),
+			errStr,
+		)
+		return false
+	}
+
+	if snapshot.Status.SnapshotVolumes == nil {
+		c.reportVMSnapshotFailure(fmt.Sprintf("VMSnapshot %q has no SnapshotVolumes", c.snapshotName()), errStr)
+		return false
+	}
+
+	return true
+}
+
+func (c *Checkup) checkVMSnapshot(ctx context.Context, errStr *string) (bool, error) {
+	log.Print("checkVMSnapshot")
+
+	if c.vmUnderTest == nil {
+		log.Print(MessageSkipNoVMI)
+		c.results.VMSnapshot = MessageSkipNoVMI
+		return false, nil
+	}
+	vmSnapshot := &snapshotv1alpha1.VirtualMachineSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: c.snapshotName(),
+		},
+		Spec: snapshotv1alpha1.VirtualMachineSnapshotSpec{
+			Source: corev1.TypedLocalObjectReference{
+				APIGroup: new("kubevirt.io"),
+				Kind:     "VirtualMachine",
+				Name:     c.vmUnderTest.Name,
+			},
+		},
+	}
+
+	log.Printf("Creating VMSnapshot %q at %s", c.snapshotName(), time.Now().Format(time.RFC3339))
+	if _, err := c.client.CreateVirtualMachineSnapshot(ctx, c.namespace, vmSnapshot); err != nil {
+		return false, fmt.Errorf("failed to create VMSnapshot: %w", err)
+	}
+	log.Printf("VMSnapshot %q created", c.snapshotName())
+
+	ready, elapsed := c.waitForVMSnapshotReady(ctx, errStr)
+	if !ready {
+		return false, nil
+	}
+
+	snapshot, err := c.client.GetVirtualMachineSnapshot(ctx, c.namespace, c.snapshotName())
+	if err != nil {
+		return false, fmt.Errorf("failed to get VMSnapshot %q: %w", c.snapshotName(), err)
+	}
+	if !c.validateVMSnapshot(snapshot, errStr) {
+		return false, nil
+	}
+
+	log.Printf("VMSnapshot for VM %q succeeded, CreationTime=%s, ReadyToUse=%s",
+		c.vmUnderTest.Name, formatMetaTime(snapshot.Status.CreationTime), formatBoolPtr(snapshot.Status.ReadyToUse))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("VMSnapshot name: %s", c.snapshotName()))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("VMSnapshot for VM %q succeeded", c.vmUnderTest.Name))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("Creation time: %s", formatMetaTime(snapshot.Status.CreationTime)))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("Creation duration: %s",
+		snapshot.Status.CreationTime.Time.Sub(snapshot.CreationTimestamp.Time).Round(time.Millisecond)))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("Ready duration: %s", elapsed))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("ReadyToUse=%s", formatBoolPtr(snapshot.Status.ReadyToUse)))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("Indications: %v", snapshot.Status.Indications))
+	appendSep(&c.results.VMSnapshot, fmt.Sprintf("Included volumes: %v", snapshot.Status.SnapshotVolumes.IncludedVolumes))
+	if len(snapshot.Status.SnapshotVolumes.ExcludedVolumes) > 0 {
+		appendSep(&c.results.VMSnapshot, fmt.Sprintf("Excluded volumes: %v", snapshot.Status.SnapshotVolumes.ExcludedVolumes))
+	}
+	return true, nil
+}
+
+// stopVMUnderTest stops the VM via the KubeVirt Stop subresource and waits until the VMI is gone.
+// Required before VirtualMachineRestore (v1alpha1 has no StopTarget policy).
+func (c *Checkup) stopVMUnderTest(ctx context.Context) error {
+	if c.vmUnderTest == nil {
+		return nil
+	}
+	vmName := c.vmUnderTest.Name
+	log.Printf("Stopping VM %q before restore", vmName)
+
+	if err := c.client.StopVirtualMachine(ctx, c.namespace, vmName, &kvcorev1.StopOptions{}); err != nil {
+		return fmt.Errorf("failed to stop VM %q: %w", vmName, err)
+	}
+
+	log.Printf("Waiting for VMI %q to disappear", vmName)
+	if err := wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, func(ctx context.Context) (bool, error) {
+		_, err := c.client.GetVirtualMachineInstance(ctx, c.namespace, vmName)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}
+		return false, nil
+	}); err != nil {
+		return fmt.Errorf("failed waiting for VMI %q to stop: %w", vmName, err)
+	}
+
+	log.Printf("VM %q stopped", vmName)
+	return nil
+}
+
+func (c *Checkup) checkVMRestore(ctx context.Context, snapshotOK bool, errStr *string) error {
+	log.Print("checkVMRestore")
+
+	if c.vmUnderTest == nil {
+		log.Print(MessageSkipNoVMI)
+		c.results.VMRestore = MessageSkipNoVMI
+		return nil
+	}
+	if !snapshotOK {
+		log.Print(MessageSkipNoSnapshot)
+		c.results.VMRestore = MessageSkipNoSnapshot
+		return nil
+	}
+
+	if err := c.stopVMUnderTest(ctx); err != nil {
+		return fmt.Errorf("failed to stop VM before restore: %w", err)
+	}
+
+	vmRestore := &snapshotv1alpha1.VirtualMachineRestore{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: c.restoreName(),
+		},
+		Spec: snapshotv1alpha1.VirtualMachineRestoreSpec{
+			Target: corev1.TypedLocalObjectReference{
+				APIGroup: new("kubevirt.io"),
+				Kind:     "VirtualMachine",
+				Name:     c.vmUnderTest.Name,
+			},
+			VirtualMachineSnapshotName: c.snapshotName(),
+		},
+	}
+
+	log.Printf("Creating VMRestore %q at %s", c.restoreName(), time.Now().Format(time.RFC3339))
+	if _, err := c.client.CreateVirtualMachineRestore(ctx, c.namespace, vmRestore); err != nil {
+		return fmt.Errorf("failed to create VMRestore: %w", err)
+	}
+	log.Printf("VMRestore %q created", c.restoreName())
+
+	complete, elapsed := c.waitForVMRestoreComplete(ctx, errStr)
+	if !complete {
+		return nil
+	}
+
+	restore, err := c.client.GetVirtualMachineRestore(ctx, c.namespace, c.restoreName())
+	if err != nil {
+		return fmt.Errorf("failed to get VMRestore %q: %w", c.restoreName(), err)
+	}
+	if !c.validateVMRestore(restore, errStr) {
+		return nil
+	}
+
+	log.Printf("VMRestore for VM %q succeeded (RestoreTime=%s, Complete=%s)",
+		c.vmUnderTest.Name, formatMetaTime(restore.Status.RestoreTime), formatBoolPtr(restore.Status.Complete))
+
+	appendSep(&c.results.VMRestore, fmt.Sprintf("VMRestore name: %s", c.restoreName()))
+	appendSep(&c.results.VMRestore, fmt.Sprintf("VMRestore for VM %q succeeded", c.vmUnderTest.Name))
+	appendSep(&c.results.VMRestore, fmt.Sprintf("Restore time: %s", formatMetaTime(restore.Status.RestoreTime)))
+	appendSep(&c.results.VMRestore, fmt.Sprintf("Complete duration: %s", elapsed))
+	appendSep(&c.results.VMRestore, fmt.Sprintf("Complete=%s", formatBoolPtr(restore.Status.Complete)))
+	return nil
+}
+
+func (c *Checkup) reportVMRestoreFailure(res string, errStr *string) {
+	log.Print(res)
+	appendSep(&c.results.VMRestore, res)
+	appendSep(errStr, res)
+}
+
+func (c *Checkup) waitForVMRestoreComplete(ctx context.Context, errStr *string) (bool, time.Duration) {
+	waitStart := time.Now()
+	log.Printf("Waiting for VMRestore %q complete (started at %s)", c.restoreName(), waitStart.Format(time.RFC3339))
+	err := wait.PollImmediateWithContext(ctx, pollInterval, c.checkupConfig.VMITimeout, func(ctx context.Context) (bool, error) {
+		restore, err := c.client.GetVirtualMachineRestore(ctx, c.namespace, c.restoreName())
+		if err != nil {
+			return false, ignoreNotFound(err)
+		}
+		if restore.Status != nil && restore.Status.Complete != nil && *restore.Status.Complete {
+			return true, nil
+		}
+		return false, nil
+	})
+	elapsed := time.Since(waitStart).Round(time.Millisecond)
+	if err != nil {
+		c.reportVMRestoreFailure(
+			fmt.Sprintf("failed waiting for VMRestore %q after %s: %v", c.restoreName(), elapsed, err),
+			errStr,
+		)
+		return false, 0
+	}
+	log.Printf("VMRestore %q complete after %s", c.restoreName(), elapsed)
+	return true, elapsed
+}
+
+func (c *Checkup) validateVMRestore(restore *snapshotv1alpha1.VirtualMachineRestore, errStr *string) bool {
+	if restore.Status == nil {
+		c.reportVMRestoreFailure(fmt.Sprintf("VMRestore %q has no status", c.restoreName()), errStr)
+		return false
+	}
+	if restore.Status.Complete == nil || !*restore.Status.Complete {
+		c.reportVMRestoreFailure(fmt.Sprintf("VMRestore %q is not complete", c.restoreName()), errStr)
+		return false
+	}
+	if len(restore.Status.Restores) == 0 {
+		c.reportVMRestoreFailure(fmt.Sprintf("VMRestore %q has no volume restores", c.restoreName()), errStr)
+		return false
+	}
+
+	expectedVolumes := sets.New[string]()
+	for _, vol := range c.vmUnderTest.Spec.Template.Spec.Volumes {
+		expectedVolumes.Insert(vol.Name)
+	}
+	restoredVolumes := sets.New[string]()
+	for _, vr := range restore.Status.Restores {
+		restoredVolumes.Insert(vr.VolumeName)
+	}
+	if !expectedVolumes.Equal(restoredVolumes.Intersection(expectedVolumes)) {
+		c.reportVMRestoreFailure(
+			fmt.Sprintf("VMRestore %q restored volumes %v do not contain all expected %v",
+				c.restoreName(), sets.List(restoredVolumes), sets.List(expectedVolumes)),
+			errStr,
+		)
+		return false
+	}
+	return true
+}
+
+func (c *Checkup) snapshotName() string {
+	return fmt.Sprintf("snapshot-%s", c.vmUnderTest.Name)
+}
+
+func (c *Checkup) restoreName() string {
+	return fmt.Sprintf("restore-%s", c.vmUnderTest.Name)
+}
+
+func appendSep(s *string, appended string) {
+	if s == nil {
+		return
+	}
+	if *s == "" {
+		*s = appended
+		return
+	}
+	*s = *s + "\n" + appended
+}
+
+func formatMetaTime(t *metav1.Time) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return t.UTC().Format("15:04:05 UTC")
+}
+
+func formatBoolPtr(b *bool) string {
+	if b == nil {
+		return "<nil>"
+	}
+	return strconv.FormatBool(*b)
+}
+
+// FIXME: use slices.contains instead
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
+}
+
+func ignoreNotFound(err error) error {
+	if k8serrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}

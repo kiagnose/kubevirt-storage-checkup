@@ -28,6 +28,10 @@ import (
 )
 
 const (
+	SelectedStorageClassKey                      = "selectedStorageClass"
+	StorageClassProvisionerKey                   = "storageClassProvisioner"
+	StorageClassDiscoveryKey                     = "storageClassDiscovery"
+	CSIDriverDiscoveryKey                        = "csiDriverDiscovery"
 	OCPVersionKey                                = "ocpVersion"
 	CNVVersionKey                                = "cnvVersion"
 	DefaultStorageClassKey                       = "defaultStorageClass"
@@ -99,6 +103,19 @@ func FormatResults(checkupResults status.Results) map[string]string {
 		ConcurrentVMBootKey:                          checkupResults.ConcurrentVMBoot,
 		VMSnapshotKey:                                checkupResults.VMSnapshot,
 		VMRestoreKey:                                 checkupResults.VMRestore,
+	}
+
+	phase1Results := map[string]string{
+		SelectedStorageClassKey:    checkupResults.SelectedStorageClass,
+		StorageClassProvisionerKey: checkupResults.StorageClassProvisioner,
+		StorageClassDiscoveryKey:   checkupResults.StorageClassDiscovery,
+		CSIDriverDiscoveryKey:      checkupResults.CSIDriverDiscovery,
+	}
+
+	for key, value := range phase1Results {
+		if value != "" {
+			formattedResults[key] = value
+		}
 	}
 
 	return formattedResults

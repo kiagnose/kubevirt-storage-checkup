@@ -61,10 +61,10 @@ func TestReportShouldSuccessfullyReportResults(t *testing.T) {
 		checkupStatus.FailureReason = []string{}
 		checkupStatus.CompletionTimestamp = time.Now()
 		checkupStatus.Results = status.Results{
-			OCPVersion:          "1.2.3",
-			CNVVersion:          "4.5.6",
-			DefaultStorageClass: "test_sc",
-			PVCBound:            "ok",
+			OCPVersion: "1.2.3",
+			CNVVersion: "4.5.6",
+			K8sResults: status.K8sResults{DefaultStorageClass: "test_sc"},
+			PVCBound:   "ok",
 			StorageProfilesWithEmptyClaimPropertySets: "sc1, sc2",
 			StorageProfilesWithSpecClaimPropertySets:  "sc3, sc4",
 			StorageProfilesWithSmartClone:             "sc4, sc5",
