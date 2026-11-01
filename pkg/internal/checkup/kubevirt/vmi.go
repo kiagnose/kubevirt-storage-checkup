@@ -17,12 +17,12 @@
  *
  */
 
-package checkup
+package kubevirt
 
 import (
 	"fmt"
 
-	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/vmi"
+	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/checkup/kubevirt/vmi"
 	"github.com/kiagnose/kubevirt-storage-checkup/pkg/internal/config"
 
 	snapshotv1 "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"

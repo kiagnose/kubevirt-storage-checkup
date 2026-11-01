@@ -23,10 +23,18 @@ import (
 	kstatus "github.com/kiagnose/kiagnose/kiagnose/status"
 )
 
+type K8sResults struct {
+	SelectedStorageClass    string
+	StorageClassProvisioner string
+	StorageClassDiscovery   string
+	CSIDriverDiscovery      string
+	DefaultStorageClass     string
+}
+
 type Results struct {
+	K8sResults
 	OCPVersion                                string
 	CNVVersion                                string
-	DefaultStorageClass                       string
 	PVCBound                                  string
 	StorageProfilesWithEmptyClaimPropertySets string
 	StorageProfilesWithSpecClaimPropertySets  string
