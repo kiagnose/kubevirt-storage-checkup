@@ -841,6 +841,22 @@ func pvHasUnsetEfsStorageClass(pv *corev1.PersistentVolume, unsetEfsSC *string) 
 		pv.Spec.StorageClassName == *unsetEfsSC
 }
 
+// isTPMSupported returns false when every node is s390x, where QEMU has no TPM backend.
+func (c *Checkup) isTPMSupported(ctx context.Context) (bool, error) {
+	nodes, err := c.client.ListNodes(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	for i := range nodes.Items {
+		if nodes.Items[i].Status.NodeInfo.Architecture != "s390x" {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 func (c *Checkup) Teardown(ctx context.Context) error {
 	if c.vmUnderTest == nil {
 		return nil
@@ -893,7 +909,12 @@ func (c *Checkup) checkVMIBoot(ctx context.Context, errStr *string) error {
 	}
 
 	vmName := uniqueVMName()
-	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, c.checkupConfig.NumOfDataVolumes)
+	withTPM, tpmErr := c.isTPMSupported(ctx)
+	if tpmErr != nil {
+		return tpmErr
+	}
+
+	c.vmUnderTest = newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, c.checkupConfig.NumOfDataVolumes, withTPM)
 	log.Printf("Creating VM %q", vmName)
 	if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, c.vmUnderTest); err != nil {
 		return fmt.Errorf("failed to create VM: %w", err)
@@ -1164,6 +1185,11 @@ func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) er
 		return nil
 	}
 
+	withTPM, err := c.isTPMSupported(ctx)
+	if err != nil {
+		return err
+	}
+
 	var wg sync.WaitGroup
 	reasons := make(chan string, numOfVMs)
 
@@ -1175,7 +1201,7 @@ func (c *Checkup) checkConcurrentVMIBoot(ctx context.Context, errStr *string) er
 			vmName := uniqueVMName()
 			log.Printf("Creating VM %q", vmName)
 
-			vm := newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, max(c.checkupConfig.NumOfDataVolumes, 1))
+			vm := newVMUnderTest(vmName, c.goldenImagePvc, c.goldenImageSnap, c.checkupConfig, max(c.checkupConfig.NumOfDataVolumes, 1), withTPM)
 			if _, err := c.client.CreateVirtualMachine(ctx, c.namespace, vm); err != nil {
 				log.Printf("failed to create VM %q: %s", vmName, err)
 				reasons <- fmt.Sprintf("%s: %v", vmName, err)
