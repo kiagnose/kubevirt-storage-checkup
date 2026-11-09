@@ -38,7 +38,7 @@ const (
 )
 
 func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapshotv1.VolumeSnapshot,
-	checkupConfig config.Config, numBlankDataVolumes int) *kvcorev1.VirtualMachine {
+	checkupConfig config.Config, numBlankDataVolumes int, withTPM bool) *kvcorev1.VirtualMachine {
 	dvName := getVMDvName(name)
 	dvOpts := []vmi.DataVolumeOption{}
 
@@ -55,9 +55,12 @@ func newVMUnderTest(name string, pvc *corev1.PersistentVolumeClaim, snap *snapsh
 	optionsToApply := []vmi.Option{
 		vmi.WithDataVolume(dvName, dvOpts...),
 		vmi.WithMemory(guestMemory),
-		vmi.WithTPM(),
 		vmi.WithTerminationGracePeriodSeconds(terminationGracePeriodSeconds),
 		vmi.WithOwnerReference(checkupConfig.PodName, checkupConfig.PodUID),
+	}
+
+	if withTPM {
+		optionsToApply = append(optionsToApply, vmi.WithTPM())
 	}
 
 	optionsToApply = append(optionsToApply,
