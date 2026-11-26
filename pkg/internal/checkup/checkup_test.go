@@ -194,6 +194,14 @@ var tests = map[string]struct {
 		},
 		expectedErr: `snapshot failed`,
 	},
+	"skipSnapshotAndRestoreOnSnapshotFeatureGateDisabled": {
+		clientConfig: clientConfig{snapshotFeatureGateDisabled: true},
+		expectedResults: map[string]string{
+			reporter.VMSnapshotKey: fmt.Sprintf(checkup.MessageSkipFeatureGateDisabled, "Snapshot"),
+			reporter.VMRestoreKey:  fmt.Sprintf(checkup.MessageSkipFeatureGateDisabled, "Snapshot"),
+		},
+		expectedErr: "",
+	},
 	"restoreFails": {
 		clientConfig: clientConfig{failRestore: true},
 		expectedResults: map[string]string{
@@ -349,6 +357,7 @@ type clientConfig struct {
 	cloneFallback                     bool
 	failMigration                     bool
 	failSnapshot                      bool
+	snapshotFeatureGateDisabled       bool
 	failRestore                       bool
 	failStop                          bool
 	singleNode                        bool
@@ -885,6 +894,10 @@ func (cs *clientStub) GetClusterVersion(ctx context.Context, name string) (*conf
 
 func (cs *clientStub) CreateVirtualMachineSnapshot(ctx context.Context, namespace string,
 	snapshot *snapshotv1alpha1.VirtualMachineSnapshot) (*snapshotv1alpha1.VirtualMachineSnapshot, error) {
+	if cs.snapshotFeatureGateDisabled {
+		return nil, errors.NewBadRequest(`admission webhook "virtualmachinesnapshot-validator.snapshot.kubevirt.io" ` +
+			"denied the request: snapshot feature gate not enabled")
+	}
 	snapshot.Namespace = namespace
 	snapshotFullName := objectFullName(snapshot.Namespace, snapshot.Name)
 	cs.createdSnapshots[snapshotFullName] = snapshot

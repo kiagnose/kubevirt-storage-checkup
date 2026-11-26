@@ -129,7 +129,7 @@ const (
 
 // optionalFeatureGates lists the KubeVirt feature gates whose checks are skipped, instead of
 // failing the checkup, when KubeVirt denies the request because the gate is not enabled.
-var optionalFeatureGates []string
+var optionalFeatureGates = []string{"Snapshot"}
 
 // Internal sentinel errors used for golden image control flow. The customer-facing
 // messages are the ErrGoldenImages* constants above; these lowercase errors satisfy
@@ -1374,6 +1374,13 @@ func (c *Checkup) checkVMSnapshot(ctx context.Context, errStr *string) (bool, er
 
 	log.Printf("Creating VMSnapshot %q at %s", c.snapshotName(), time.Now().Format(time.RFC3339))
 	if _, err := c.client.CreateVirtualMachineSnapshot(ctx, c.namespace, vmSnapshot); err != nil {
+		if gate := disabledFeatureGate(err); gate != "" {
+			// VM restore is behind the same feature gate, so it is skipped for the same reason.
+			c.results.VMSnapshot = fmt.Sprintf(MessageSkipFeatureGateDisabled, gate)
+			c.results.VMRestore = c.results.VMSnapshot
+			log.Print(c.results.VMSnapshot)
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to create VMSnapshot: %w", err)
 	}
 	log.Printf("VMSnapshot %q created", c.snapshotName())
@@ -1448,8 +1455,10 @@ func (c *Checkup) checkVMRestore(ctx context.Context, snapshotOK bool, errStr *s
 		return nil
 	}
 	if !snapshotOK {
-		log.Print(MessageSkipNoSnapshot)
-		c.results.VMRestore = MessageSkipNoSnapshot
+		if c.results.VMRestore == "" {
+			c.results.VMRestore = MessageSkipNoSnapshot
+		}
+		log.Print(c.results.VMRestore)
 		return nil
 	}
 
