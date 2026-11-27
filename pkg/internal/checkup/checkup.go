@@ -121,10 +121,15 @@ const (
 	MessageSkipNoGoldenImage         = "Skipped - no golden image PVC or Snapshot"
 	MessageSkipNoVMI                 = "Skipped - no VMI"
 	MessageSkipNoSnapshot            = "Skipped - no VM snapshot"
+	MessageSkipFeatureGateDisabled   = "Skipped - %s feature gate not enabled"
 	MessageSkipSingleNode            = "Skipped - single node"
 
 	pollInterval = 5 * time.Second
 )
+
+// optionalFeatureGates lists the KubeVirt feature gates whose checks are skipped, instead of
+// failing the checkup, when KubeVirt denies the request because the gate is not enabled.
+var optionalFeatureGates = []string{"Snapshot"}
 
 // Internal sentinel errors used for golden image control flow. The customer-facing
 // messages are the ErrGoldenImages* constants above; these lowercase errors satisfy
@@ -1334,6 +1339,18 @@ func (c *Checkup) validateVMSnapshot(snapshot *snapshotv1alpha1.VirtualMachineSn
 	return true
 }
 
+// disabledFeatureGate returns the optional feature gate that err says is not enabled, or "".
+func disabledFeatureGate(err error) string {
+	msg := strings.ToLower(err.Error())
+	for _, gate := range optionalFeatureGates {
+		featureGate := strings.ToLower(gate) + " feature gate"
+		if strings.Contains(msg, featureGate+" not enabled") || strings.Contains(msg, featureGate+" is not enabled") {
+			return gate
+		}
+	}
+	return ""
+}
+
 func (c *Checkup) checkVMSnapshot(ctx context.Context, errStr *string) (bool, error) {
 	log.Print("checkVMSnapshot")
 
@@ -1357,6 +1374,13 @@ func (c *Checkup) checkVMSnapshot(ctx context.Context, errStr *string) (bool, er
 
 	log.Printf("Creating VMSnapshot %q at %s", c.snapshotName(), time.Now().Format(time.RFC3339))
 	if _, err := c.client.CreateVirtualMachineSnapshot(ctx, c.namespace, vmSnapshot); err != nil {
+		if gate := disabledFeatureGate(err); gate != "" {
+			// VM restore is behind the same feature gate, so it is skipped for the same reason.
+			c.results.VMSnapshot = fmt.Sprintf(MessageSkipFeatureGateDisabled, gate)
+			c.results.VMRestore = c.results.VMSnapshot
+			log.Print(c.results.VMSnapshot)
+			return false, nil
+		}
 		return false, fmt.Errorf("failed to create VMSnapshot: %w", err)
 	}
 	log.Printf("VMSnapshot %q created", c.snapshotName())
@@ -1431,8 +1455,10 @@ func (c *Checkup) checkVMRestore(ctx context.Context, snapshotOK bool, errStr *s
 		return nil
 	}
 	if !snapshotOK {
-		log.Print(MessageSkipNoSnapshot)
-		c.results.VMRestore = MessageSkipNoSnapshot
+		if c.results.VMRestore == "" {
+			c.results.VMRestore = MessageSkipNoSnapshot
+		}
+		log.Print(c.results.VMRestore)
 		return nil
 	}
 
